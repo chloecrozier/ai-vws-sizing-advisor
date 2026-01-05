@@ -1,188 +1,150 @@
+# AI vWS Sizing Advisor
 
-<h1>AI vWS Sizing Advisor</h1>
+## Overview
 
-## Purpose
+AI vWS Sizing Advisor is a RAG-powered tool that helps you determine the optimal NVIDIA vGPU sizing configuration for AI workloads on NVIDIA AI Virtual Workstation (AI vWS). Using NVIDIA vGPU documentation and best practices, it provides tailored recommendations for optimal performance and resource efficiency.
 
-AI vWS Sizing Advisor helps you determine the optimal NVIDIA vGPU configuration for your AI workloads. Enter your workload requirements (model size, concurrent users, performance needs) and receive validated vGPU profile recommendations including:
+Enter your workload requirements and receive validated recommendations including:
 
 - **vGPU Profile** - Recommended profile (e.g., L40S-24Q) based on your workload
 - **Resource Requirements** - vCPUs, GPU memory, system RAM needed
 - **Performance Estimates** - Expected latency, throughput, and time to first token
-- **Live Testing** - Automatically deploy and test your configuration on a VM
+- **Live Testing** - Instantly deploy and validate your configuration locally using vLLM containers
+
+The tool differentiates between RAG and inference workloads by accounting for embedding vectors and database overhead. It intelligently suggests GPU passthrough when jobs exceed standard vGPU profile limits.
 
 ## Prerequisites
 
-### Hardware Requirements
-- **NVIDIA Certified Server** with supported GPU (L40S, H100, A100, etc.)
-- **Hypervisor** supporting NVIDIA vGPU (vSphere, KVM, etc.)
-- **vGPU License** (v17.4 or later) - [Get 90-day trial](https://www.nvidia.com/en-us/data-center/products/vgpu/vgpu-software-trial/)
+### Hardware
+- **GPU:** NVIDIA RTX Pro 6000 Blackwell Server Edition, L40S, L40, L4, or A40
+- **GPU Memory:** 24 GB minimum
+- **System RAM:** 32 GB recommended
+- **Storage:** 50 GB free space
 
-### Advisor Host VM
-- **OS:** Ubuntu 22.04 or 24.04
-- **vGPU Profile:** 24Q
-- **vCPUs:** 16
-- **Memory:** 96 GB
-- **Storage:** 96 GB
+### Software
+- **OS:** Ubuntu 22.04 LTS
+- **NVIDIA GPU Drivers:** Version 535+
 
-### Test VM (for validation)
-- **OS:** Ubuntu 22.04 or 24.04  
-- **vGPU Profile:** As recommended by the tool
-- **SSH Enabled:** For automatic deployment
+**Quick Install:**
+```bash
+# Install Docker and npm
+sudo apt update && sudo apt install -y docker.io npm
 
-### Software Requirements
-- **Docker** (v20.10+) - [Install guide](https://docs.docker.com/engine/install/ubuntu/)
-- **Docker Compose Plugin** - [Install guide](https://docs.docker.com/compose/install/)
-- **Node.js** (v18+) and **npm** - [Install guide](https://nodejs.org/)
-- **NGC API Key** - [Join NVIDIA Developer Program](https://developer.nvidia.com/developer-program)
-- **HuggingFace Token** - For model access ([Get token](https://huggingface.co/settings/tokens))
+# Add user to docker group (recommended) OR set socket permissions
+sudo usermod -aG docker $USER && newgrp docker
+# OR: sudo chmod 666 /var/run/docker.sock
+
+# Verify installations
+git --version && docker --version && npm --version && curl --version
+
+# Test GPU access in Docker
+docker run --rm --gpus all nvidia/cuda:12.4.0-base-ubuntu22.04 nvidia-smi
+```
+
+> **Note:** Docker must be at `/usr/bin/docker` (verified in `deploy/compose/docker-compose-rag-server.yaml`). User must be in docker group or have socket permissions.
+
+### API Keys
+- **NVIDIA Build API Key** (Required) - [Get your key](https://build.nvidia.com/settings/api-keys)
+- **HuggingFace Token** (Optional) - [Create token](https://huggingface.co/settings/tokens) for gated models
 
 ## Deployment
 
-### 1. Clone Repository
-
-   ```bash
-   git clone https://github.com/anpandacoding/vws-sizing
-   cd vws-sizing
-   ```
-
-### 2. Set Up NGC Authentication
-
-   ```bash
-   export NGC_API_KEY="nvapi-your-key-here"
-   echo "${NGC_API_KEY}" | docker login nvcr.io -u '$oauthtoken' --password-stdin
+**1. Clone and navigate:**
+```bash
+git clone https://github.com/NVIDIA/GenerativeAIExamples.git
+cd GenerativeAIExamples/community/ai-vws-sizing-advisor
 ```
 
-### 3. Start RAG Infrastructure
-
+**2. Set NGC API key:**
 ```bash
-   source deploy/compose/.env
-   ./scripts/start_vgpu_rag.sh --skip-nims
+export NGC_API_KEY="nvapi-your-key-here"
+echo "${NGC_API_KEY}" | docker login nvcr.io -u '$oauthtoken' --password-stdin
 ```
 
-This starts:
-- Vector database (Milvus)
-- vGPU knowledge base (auto-loaded from `./vgpu_docs`)
-
-### 4. Start RAG Server
-
-   ```bash
-   docker compose -f deploy/compose/docker-compose-rag-server.yaml up -d
-   ```
-
-This starts the RAG API server at http://localhost:8081
-   
-### 5. Start Frontend
-   
-   ```bash
-   cd frontend
-   npm install
-   npm run dev
-   ```
-   
-Access the UI at **http://localhost:3000**
-
-### 6. Configure Your Workload
-
-1. **Select Workload Type** - Inference, RAG, Fine-tuning, etc.
-2. **Enter Model Details** - Model name, size, quantization
-3. **Specify Requirements** - Concurrent users, latency targets, throughput needs
-4. **Get Recommendation** - View suggested vGPU profile and resource allocation
-
-### 7. Test Configuration (Optional)
-
-To validate the recommendation on a real VM:
-
-1. Click **"Apply Configuration"**
-2. Enter VM credentials:
-   - VM IP Address
-   - Username
-   - Password (used once for SSH key setup)
-   - HuggingFace Token
-3. Click **"Apply Configuration"**
-
-The tool will:
-- Auto-generate SSH keys (`vgpu_sizing_advisor`) if needed
-- Deploy vLLM server on your VM
-- Run inference tests
-- Report actual performance metrics
-
-**Note:** SSH keys are configured automatically. Just enter your password once - the tool handles the rest!
-
-## What You Get
-
-### Sizing Recommendation
-- vGPU profile matched to your workload
-- CPU, memory, and storage requirements
-- Validated against NVIDIA specifications
-
-### Performance Estimates
-- Time to First Token (TTFT)
-- End-to-end latency
-- Throughput (tokens/second)
-- Concurrent user support
-
-### Live Validation
-- Automated deployment to test VM
-- Real performance measurements
-- Configuration verification
-- Detailed logs for troubleshooting
-
-## Quick Start Example
-
-1. Open http://localhost:3000
-2. Select "Inference" workload
-3. Enter "meta-llama/Llama-3.1-8B-Instruct"
-4. Set "10 concurrent users"
-5. Click "Get Recommendation"
-
-The advisor analyzes your requirements and suggests an optimal vGPU configuration with performance estimates.
-
-## Stopping Services
-
+**3. Start backend services:**
 ```bash
-./scripts/stop_vgpu_rag.sh
+./scripts/start_app.sh
 ```
+This automatically starts all backend services (Milvus, ingestion, RAG server). First startup takes 3-5 minutes.
 
-## Documentation
-
-- **Deployment Logs:** Check debug output in the UI
-- **RAG API Docs:** http://localhost:8081/docs
-- **Add More Docs:** Place PDFs in `./vgpu_docs` directory
-
-## Troubleshooting
-
-### Backend Issues
+**4. Start frontend (in new terminal):**
 ```bash
-# Restart backend
-docker compose -f deploy/compose/docker-compose-rag-server.yaml restart
-
-# View logs
-docker logs rag-server
-```
-
-### Frontend Issues
-```bash
-# Restart frontend
 cd frontend
+npm install
 npm run dev
 ```
 
-### SSH Connection Issues
-- Ensure VM is accessible on the network
-- Check SSH is enabled: `ssh username@vm-ip`
-- Verify password is correct
+## Usage
 
-## Coming Soon
+2. **Select Workload Type:** RAG or Inference
 
-We're actively developing new features to enhance the AI vWS Sizing Advisor:
+3. **Enter Parameters:**
+   - Model name (e.g., `meta-llama/Llama-2-7b-chat-hf`)
+   - GPU type
+   - Prompt size (input tokens)
+   - Response size (output tokens)
+   - Quantization (FP16, INT8, INT4)
+   - For RAG: Embedding model and vector dimensions
 
-- **Fine-Tuning Workload Support** - Sizing recommendations for model fine-tuning scenarios
-- **Local vLLM Testing** - Test configurations on your local machine before VM deployment
-- **Demo Video** - Watch a complete walkthrough of the advisor in action
+4. **View Recommendations:**
+   - Recommended vGPU profiles
+   - Resource requirements (vCPUs, RAM, GPU memory)
+   - Performance estimates
+
+5. **Test Locally** (optional):
+   - Run local inference with a containerized vLLM server
+   - View performance metrics
+   - Compare actual results versus suggested profile configuration
+
+## Management Commands
+
+```bash
+# Service Management
+./scripts/status.sh           # Check status of all services
+./scripts/restart_app.sh      # Restart RAG backend
+./scripts/stop_app.sh         # Stop all services (with Docker cleanup)
+./scripts/stop_app.sh --volumes     # Stop services and remove all data
+./scripts/stop_app.sh --cleanup-images  # Stop services and clean Docker cache
+
+# Logs
+docker logs -f rag-server      # View RAG server logs
+docker logs -f ingestor-server # View ingestion logs
+```
+
+### Stop Script Options
+
+The stop script automatically performs Docker cleanup operations:
+- Removes stopped containers
+- Prunes unused volumes
+- Cleans up unused networks
+- Optionally removes dangling images (`--cleanup-images`)
+- Optionally removes all data volumes (`--volumes`)
+
+## Adding Documents to RAG Context
+
+The tool includes NVIDIA vGPU documentation by default. To add your own:
+
+```bash
+# Copy document to docs directory
+cp your-document.pdf ./vgpu_docs/
+
+# Trigger ingestion
+curl -X POST -F "file=@./vgpu_docs/your-document.pdf" http://localhost:8082/v1/ingest
+```
+
+**Supported formats:** PDF, TXT, DOCX, HTML, PPTX
+
+
 
 
 ## License
 
-Licensed under the [Apache License, Version 2.0](./LICENSE).
+Licensed under the Apache License, Version 2.0.
 
 Models governed by [NVIDIA AI Foundation Models Community License](https://docs.nvidia.com/ai-foundation-models-community-license.pdf) and [Llama 3.2 Community License](https://www.llama.com/llama3_2/license/).
+
+---
+
+**Version:** 2.2 (November 2025) - See [CHANGELOG.md](./CHANGELOG.md)
+
+**Support:** [GitHub Issues](https://github.com/NVIDIA/GenerativeAIExamples/issues) | [NVIDIA Forums](https://forums.developer.nvidia.com/)
