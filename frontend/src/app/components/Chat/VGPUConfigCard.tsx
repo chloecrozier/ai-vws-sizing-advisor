@@ -570,7 +570,7 @@ export default function VGPUConfigCard({ config }: VGPUConfigCardProps) {
   const vramUsage = getVRAMUsageData();
 
   return (
-    <div className="bg-neutral-900 border border-neutral-700 rounded-lg overflow-hidden shadow-lg">
+    <div className="overflow-hidden">
       {/* Content */}
       {isExpanded && (
         <div className="p-6">

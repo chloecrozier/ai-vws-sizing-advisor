@@ -54,7 +54,7 @@ services:
 
       # enable multi-turn conversation in the rag chain - this controls conversation history usage
       # while doing query rewriting and in LLM prompt
-      ENABLE_MULTITURN: ${ENABLE_MULTITURN:-False}
+      ENABLE_MULTITURN: ${ENABLE_MULTITURN:-True}
 
       # enable query rewriting for multiturn conversation in the rag chain.
       # This will improve accuracy of the retrieiver pipeline but increase latency due to an additional LLM call

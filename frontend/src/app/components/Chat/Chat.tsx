@@ -20,6 +20,7 @@ import RightSidebar from "../RightSidebar/RightSidebar";
 import VGPUConfigCard from "./VGPUConfigCard";
 import WorkloadConfigWizard from "./WorkloadConfigWizard";
 import ApplyConfigurationForm from "./ApplyConfigurationForm";
+import ChatPanel from "../RightSidebar/ChatPanel";
 import { v4 as uuidv4 } from "uuid";
 import { API_CONFIG } from "@/app/config/api";
 import { marked } from "marked";
@@ -36,6 +37,10 @@ export default function Chat() {
   const [isApplyFormOpen, setIsApplyFormOpen] = useState(false);
   const [applyFormConfig, setApplyFormConfig] = useState<any>(null);
   const [showPassthroughError, setShowPassthroughError] = useState(false);
+  const [lastVGPUConfig, setLastVGPUConfig] = useState<any>(null); // Track last vGPU config for context
+  const [showChatPanel, setShowChatPanel] = useState(false); // Show inline chat panel
+  const [chatPanelHistory, setChatPanelHistory] = useState<Array<{ role: "user" | "assistant"; content: string }>>([]);
+  const [isChatPanelLoading, setIsChatPanelLoading] = useState(false);
   const { streamState, processStream, startStream, resetStream, stopStream } =
     useChatStream();
 
@@ -82,6 +87,18 @@ export default function Chat() {
       // Only update citations if the panel is already open
       if (activePanel === "citations") {
         setActiveCitations(lastMessage.citations);
+      }
+    }
+    
+    // Extract vGPU config from the last message if it exists
+    if (lastMessage && lastMessage.role === "assistant" && lastMessage.content) {
+      try {
+        const parsed = JSON.parse(lastMessage.content.trim());
+        if (parsed.title === "generate_vgpu_config" && parsed.parameters) {
+          setLastVGPUConfig(parsed);
+        }
+      } catch {
+        // Not a JSON config, ignore
       }
     }
   }, [messages, activePanel, setActiveCitations]);
@@ -134,7 +151,7 @@ export default function Chat() {
   const renderMessageContent = (content: string, isTyping: boolean, messageId: string) => {
     if (isTyping) {
       return (
-        <div className="flex items-center space-x-3">
+        <div className="flex items-center justify-center space-x-3 py-8">
           <div className="animate-spin rounded-full h-5 w-5 border-t-2 border-b-2 border-[#76b900]"></div>
           <span className="text-gray-400">Generating configuration...</span>
         </div>
@@ -148,81 +165,117 @@ export default function Chat() {
         const configId = messageId;
         const isExpanded = expandedConfigId === configId;
         
-        // Return a preview card with inline expandable details
+        // Return a preview card with inline expandable details AND chat panel
         return (
-          <div className="bg-neutral-800 border border-[#76b900]/30 rounded-lg p-5">
-            <div className="flex items-center gap-2 mb-4">
-              <svg className="w-5 h-5 text-[#76b900]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
-              </svg>
-              <h3 className="text-white font-semibold text-lg">vGPU Configuration Ready</h3>
-            </div>
-            
-            <p className="text-sm text-gray-300 mb-4">
-              {vgpuConfig.description.split(/(Inference|RAG|inference|rag)/gi).map((part: string, i: number) => 
-                /^(Inference|RAG|inference|rag)$/i.test(part) ? (
-                  <span key={i} className="font-bold text-[#76b900]">{part}</span>
-                ) : part
-              )}
-            </p>
-            
-            {(vgpuConfig.parameters.vgpu_profile || vgpuConfig.parameters.vGPU_profile) && (
-              <div className="flex items-center gap-4 text-sm mb-4">
-                <span className="text-gray-400">Profile:</span>
-                <span className="text-[#76b900] font-medium">{vgpuConfig.parameters.vgpu_profile || vgpuConfig.parameters.vGPU_profile}</span>
-                {vgpuConfig.parameters.gpu_memory_size && (
-                  <>
-                    <span className="text-gray-400">•</span>
-                    <span className="text-gray-400">Memory:</span>
-                    <span className="text-[#76b900] font-medium">{vgpuConfig.parameters.gpu_memory_size} GB</span>
-                  </>
-                )}
-              </div>
-            )}
-            
-            {/* Configuration Details Toggle Button */}
-            <button
-              onClick={() => {
-                setExpandedConfigId(isExpanded ? null : configId);
-              }}
-              className="w-full px-4 py-2.5 bg-neutral-700 hover:bg-neutral-600 text-white rounded-lg font-medium transition-colors flex items-center justify-center gap-2 mb-3"
-            >
-              <svg className={`w-4 h-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-              </svg>
-              {isExpanded ? 'Hide' : 'Show'} Configuration Details
-            </button>
-            
-            {/* Inline Configuration Details */}
-            {isExpanded && (
-              <div className="mb-3 animate-in fade-in duration-200">
-                <VGPUConfigCard config={vgpuConfig} />
-              </div>
-            )}
-            
-            {/* Verify Configuration Button */}
-            <div>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  
-                  // Check if this is a GPU passthrough configuration (vgpu_profile is null)
-                  const profile = vgpuConfig.parameters?.vgpu_profile || vgpuConfig.parameters?.vGPU_profile;
-                  if (!profile) {
-                    setShowPassthroughError(true);
-                    return;
-                  }
-                  
-                  setApplyFormConfig(vgpuConfig);
-                  setIsApplyFormOpen(true);
-                }}
-                className="w-full px-4 py-2 bg-[#76b900] hover:bg-[#5a8c00] text-white rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+          <div className="relative w-[80%] mx-auto">
+            <div className="bg-[#252525] border border-[#76b900]/30 rounded-lg p-5 relative">
+              <div className="flex items-center gap-2 mb-4">
+                <svg className="w-5 h-5 text-[#76b900]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
                 </svg>
-                Verify Configuration
+                <h3 className="text-white font-semibold text-lg">vGPU Configuration Ready</h3>
+              </div>
+            
+              <p className="text-sm text-gray-300 mb-4">
+                {vgpuConfig.description.split(/(Inference|RAG|inference|rag)/gi).map((part: string, i: number) => 
+                  /^(Inference|RAG|inference|rag)$/i.test(part) ? (
+                    <span key={i} className="font-bold text-[#76b900]">{part}</span>
+                  ) : part
+                )}
+              </p>
+              
+              {(vgpuConfig.parameters.vgpu_profile || vgpuConfig.parameters.vGPU_profile) && (
+                <div className="flex items-center gap-4 text-sm mb-4">
+                  <span className="text-gray-400">Profile:</span>
+                  <span className="text-[#76b900] font-medium">{vgpuConfig.parameters.vgpu_profile || vgpuConfig.parameters.vGPU_profile}</span>
+                  {vgpuConfig.parameters.gpu_memory_size && (
+                    <>
+                      <span className="text-gray-400">•</span>
+                      <span className="text-gray-400">Memory:</span>
+                      <span className="text-[#76b900] font-medium">{vgpuConfig.parameters.gpu_memory_size} GB</span>
+                    </>
+                  )}
+                </div>
+              )}
+              
+              {/* Configuration Details Toggle Button */}
+              <button
+                onClick={() => {
+                  setExpandedConfigId(isExpanded ? null : configId);
+                  if (!isExpanded) {
+                    // Reset chat history when opening
+                    setChatPanelHistory([]);
+                  }
+                }}
+                className="w-full px-4 py-2.5 bg-neutral-700 hover:bg-neutral-600 text-white rounded-lg font-medium transition-colors flex items-center justify-center gap-2 mb-3"
+              >
+                <svg className={`w-4 h-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+                {isExpanded ? 'Hide' : 'Show'} Configuration Details
               </button>
+              
+              {/* Inline Configuration Details with Chat Panel */}
+              {isExpanded && (
+                <div className="mb-3 animate-in fade-in duration-200">
+                  <div className="flex items-start h-full bg-[#252525] rounded-lg overflow-hidden">
+                    {/* Configuration Details - 70% */}
+                    <div className="w-[70%] flex flex-col">
+                      <VGPUConfigCard config={vgpuConfig} />
+                    </div>
+                    
+                    {/* Chat Panel - 30% - Always visible and full height */}
+                    <div className="w-[30%] flex-shrink-0 self-stretch">
+                      <ChatPanel
+                        vgpuConfig={vgpuConfig}
+                        onSendMessage={handleChatPanelMessage}
+                        chatHistory={chatPanelHistory}
+                        isLoading={isChatPanelLoading}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+              
+              {/* Action Buttons - Full Width */}
+              <div className="space-y-3">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    
+                    // Check if this is a GPU passthrough configuration (vgpu_profile is null)
+                    const profile = vgpuConfig.parameters?.vgpu_profile || vgpuConfig.parameters?.vGPU_profile;
+                    if (!profile) {
+                      setShowPassthroughError(true);
+                      return;
+                    }
+                    
+                    setApplyFormConfig(vgpuConfig);
+                    setIsApplyFormOpen(true);
+                  }}
+                  className="w-full px-4 py-2 bg-[#76b900] hover:bg-[#5a8c00] text-white rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  Verify Configuration
+                </button>
+                
+                {/* Size Another Configuration Button */}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsWizardOpen(true);
+                  }}
+                  className="w-full px-4 py-2 bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white rounded-lg font-medium transition-all duration-200 flex items-center justify-center gap-2"
+                  title="Open Workload Configuration Wizard"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
+                  </svg>
+                  Size another vGPU Configuration
+                </button>
+              </div>
             </div>
           </div>
         );
@@ -259,6 +312,63 @@ export default function Chat() {
     content: "",
     timestamp: new Date().toISOString(),
   });
+
+  const handleChatPanelMessage = async (message: string) => {
+    if (!lastVGPUConfig) return;
+
+    setIsChatPanelLoading(true);
+    setChatPanelHistory((prev) => [...prev, { role: "user", content: message }]);
+
+    try {
+      const enhancedMessage = `${message}\n\n[Configuration Context: vGPU Profile: ${lastVGPUConfig.parameters?.vgpu_profile || 'N/A'}, GPU Memory: ${lastVGPUConfig.parameters?.gpu_memory_size || 'N/A'}GB]`;
+
+      const requestBody: GenerateRequest = {
+        messages: chatPanelHistory.concat([{ role: "user", content: enhancedMessage }]),
+        collection_name: "vgpu_knowledge_base",
+        temperature,
+        top_p: topP,
+        use_knowledge_base: true,
+        enable_citations: false,
+      };
+
+      const response = await fetch("/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(requestBody),
+      });
+
+      if (!response.ok) throw new Error("Failed");
+
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error("No body");
+
+      let assistantMsg = "";
+      const decoder = new TextDecoder();
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value);
+        const lines = chunk.split("\n");
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (data.choices?.[0]?.delta?.content) {
+                assistantMsg += data.choices[0].delta.content;
+              }
+            } catch (e) {}
+          }
+        }
+      }
+
+      setChatPanelHistory((prev) => [...prev, { role: "assistant", content: assistantMsg || "No response" }]);
+    } catch (error) {
+      setChatPanelHistory((prev) => [...prev, { role: "assistant", content: "Error occurred" }]);
+    } finally {
+      setIsChatPanelLoading(false);
+    }
+  };
 
   const createRequestBody = (userMessage: ChatMessage) => {
     // Create base request body - always use the vGPU knowledge base
@@ -376,59 +486,64 @@ export default function Chat() {
   };
 
   return (
-    <div className="flex h-[calc(100vh-56px)] bg-[#121212]">
+    <div className="flex h-[calc(100vh-56px)] bg-[#1a1a1a]">
       <div
         className={`flex flex-1 transition-all duration-300 ${
           !!activePanel ? "mr-[400px]" : ""
         }`}
       >
         <div className="relative flex-1">
-          <RightSidebar />
-          <div className="flex h-full flex-col">
-            <div className="flex-1 overflow-y-auto p-4">
-              <div className="mx-auto max-w-5xl space-y-6">
-                {messages.map((msg) => (
-                  <div
-                    key={msg.id}
-                    className={`flex ${
-                      msg.role === "user" ? "justify-end" : "justify-start"
-                    }`}
+          <RightSidebar 
+            vgpuConfig={lastVGPUConfig}
+            onSendChatMessage={handleChatPanelMessage}
+            chatHistory={chatPanelHistory}
+            isChatLoading={isChatPanelLoading}
+          />
+          <div className="flex h-full flex-col w-full">
+            <div className="flex-1 overflow-y-auto p-4 w-full bg-[#1a1a1a]">
+              {/* Show centered button when no messages */}
+              {messages.length === 0 ? (
+                <div className="flex items-center justify-center h-full">
+                  <button
+                    onClick={() => setIsWizardOpen(true)}
+                    className="bg-gradient-to-r from-green-600 to-green-700 text-white px-16 py-8 rounded-xl shadow-2xl hover:from-green-700 hover:to-green-800 transition-all duration-200 hover:scale-[1.05] flex items-center justify-center space-x-4 min-w-[500px]"
+                    title="Open Workload Configuration Wizard"
                   >
+                    <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
+                    </svg>
+                    <span className="text-2xl font-semibold">Create vGPU Sizing Recommendation</span>
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-6 w-full flex flex-col items-center">
+                  {messages.map((msg) => (
                     <div
-                      className={`max-w-4xl w-full rounded-lg p-4 ${
-                        msg.role === "user"
-                          ? "bg-neutral-800 text-white"
-                          : "bg-neutral-800 text-white"
+                      key={msg.id}
+                      className={`flex w-full ${
+                        msg.role === "user" ? "justify-end" : "justify-start"
                       }`}
                     >
-                      <div className="text-sm">
-                        {msg.content
-                          ? renderMessageContent(msg.content, false, msg.id)
-                          : msg.role === "assistant" && streamState.isTyping
-                            ? renderMessageContent("", true, msg.id)
-                            : ""}
+                      <div
+                        className={`w-full ${
+                          msg.role === "user"
+                            ? "text-white"
+                            : "text-white"
+                        }`}
+                      >
+                        <div className="text-sm">
+                          {msg.content
+                            ? renderMessageContent(msg.content, false, msg.id)
+                            : msg.role === "assistant" && streamState.isTyping
+                              ? renderMessageContent("", true, msg.id)
+                              : ""}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
-                <div ref={messagesEndRef} />
-              </div>
-            </div>
-
-            <div className="flex-shrink-0 border-t border-neutral-800">
-              <div className="p-4">
-                <button
-                  onClick={() => setIsWizardOpen(true)}
-                  className="w-full bg-gradient-to-r from-green-600 to-green-700 text-white p-4 rounded-lg shadow-lg hover:from-green-700 hover:to-green-800 transition-all duration-200 hover:scale-[1.02] flex items-center justify-center space-x-3"
-                  title="Open Workload Configuration Wizard"
-                >
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
-                  </svg>
-                  <span className="text-lg font-bold">vGPU</span>
-                  <span className="font-medium">Initialize Sizing Job</span>
-                </button>
-              </div>
+                  ))}
+                  <div ref={messagesEndRef} />
+                </div>
+              )}
             </div>
           </div>
         </div>
