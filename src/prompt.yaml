@@ -69,7 +69,7 @@ chat_template: |
     ```json
     {{
       "title": "generate_vgpu_config",
-      "description": "Brief 1-2 sentence summary",
+      "description": "{{GPU_MODEL}} with vGPU profile {{SELECTED_PROFILE}} for inference of {{MODEL_NAME}} ({{QUANTIZATION}})",
       "parameters": {{
         "vgpu_profile": "BSE-48Q",
         "vcpu_count": 16,
@@ -213,7 +213,7 @@ rag_template: |
     ```json
     {{
       "title": "generate_vgpu_config",
-      "description": "Brief 1-2 sentence summary",
+      "description": "{{GPU_MODEL}} with vGPU profile {{SELECTED_PROFILE}} for inference of {{MODEL_NAME}} ({{QUANTIZATION}})",
       "parameters": {{
         "vgpu_profile": "BSE-48Q",
         "vcpu_count": 16,
@@ -307,10 +307,11 @@ reflection_response_regeneration_prompt:
     You are an expert NVIDIA vGPU configuration specialist. Generate a grounded vGPU configuration description
     based ONLY on information explicitly found in the provided context documents.
     
-    Your description should be concise (1-2 sentences) and mention:
-    1. The recommended vGPU profile
-    2. Configuration feasibility
-    3. Key constraints if any
+    Your description should be ULTRA-CONCISE (single sentence, <50 words) using this format:
+    "{GPU_MODEL} with vGPU profile {SELECTED_PROFILE} for inference of {MODEL_NAME} ({QUANTIZATION})"
+    
+    Example: "L40S with vGPU profile L40S-48Q for inference of Llama-3.1-8B-Instruct (FP16)"
+    Do NOT include extra details about memory margins, safety, or system RAM.
     
     CRITICAL RULES:
     - Use ONLY vGPU profiles that appear exactly in the context (e.g., L40S-8Q, L4-4Q)
