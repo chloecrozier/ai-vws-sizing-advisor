@@ -3,7 +3,7 @@
 
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 
 interface ChatPanelProps {
   vgpuConfig: any;
@@ -21,6 +21,7 @@ export default function ChatPanel({
   onCloseChat,
 }: ChatPanelProps) {
   const [inputMessage, setInputMessage] = useState("");
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -30,10 +31,15 @@ export default function ChatPanel({
     }
   };
 
+  // Auto-scroll to bottom when new messages arrive
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [chatHistory, isLoading]);
+
   return (
-    <div className="flex h-full flex-col border-l border-neutral-700/40">
+    <div className="flex flex-col w-full h-full min-w-0">
       {/* Chat Header */}
-      <div className="p-3 bg-[#252525] border-b border-neutral-700/30">
+      <div className="p-3 bg-[#252525] border-b border-neutral-700/30 flex-shrink-0">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-medium text-gray-300 uppercase tracking-wider">
             Ask Questions
@@ -52,21 +58,19 @@ export default function ChatPanel({
         </div>
       </div>
 
-      {/* Chat Messages */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-3 bg-[#252525]">
+      {/* Chat Messages - Scrollable */}
+      <div 
+        className="flex-1 p-3 space-y-3 bg-[#252525] min-h-0"
+        style={{
+          overflowY: 'scroll',
+          scrollbarWidth: 'thin',
+          scrollbarColor: '#76b900 #2a2a2a',
+          WebkitOverflowScrolling: 'touch'
+        }}
+      >
         {chatHistory.length === 0 ? (
-          <div className="text-center text-gray-500 mt-8">
-            <div className="mb-3 text-3xl">💬</div>
-            <p className="text-sm mb-4 text-gray-400">Ask questions about your configuration</p>
-            <div className="text-xs space-y-2">
-              <p className="text-gray-500 font-medium">Examples:</p>
-              <div className="text-left space-y-1.5 text-gray-600 max-w-[200px] mx-auto">
-                <p>• Why this profile?</p>
-                <p>• Can it handle 10 users?</p>
-                <p>• Is there a smaller option?</p>
-                <p>• RAM requirements?</p>
-              </div>
-            </div>
+          <div className="text-center text-gray-500 py-8">
+            <p className="text-sm text-gray-400">Ask questions about your configuration</p>
           </div>
         ) : (
           chatHistory.map((msg, idx) => (
@@ -96,23 +100,24 @@ export default function ChatPanel({
             </div>
           </div>
         )}
+        <div ref={messagesEndRef} />
       </div>
 
-      {/* Input Area */}
-      <div className="p-4 bg-[#252525] border-t border-neutral-700/30">
-        <form onSubmit={handleSubmit} className="flex gap-2">
+      {/* Input Area - At bottom of chat panel */}
+      <div className="p-4 bg-[#252525] border-t border-neutral-700/30 flex-shrink-0 min-w-0">
+        <form onSubmit={handleSubmit} className="flex gap-2 w-full min-w-0">
           <input
             type="text"
             value={inputMessage}
             onChange={(e) => setInputMessage(e.target.value)}
             placeholder="Ask about your configuration..."
             disabled={isLoading}
-            className="flex-1 rounded-lg bg-neutral-800/50 border border-neutral-700 px-4 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-[#76b900] disabled:opacity-50"
+            className="flex-1 min-w-0 rounded-lg bg-neutral-800/50 border border-neutral-700 px-4 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-[#76b900] disabled:opacity-50"
           />
           <button
             type="submit"
             disabled={!inputMessage.trim() || isLoading}
-            className="px-4 py-2 bg-[#76b900] hover:bg-[#5a8c00] text-white rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+            className="px-4 py-2 bg-[#76b900] hover:bg-[#5a8c00] text-white rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm flex-shrink-0"
           >
             Send
           </button>

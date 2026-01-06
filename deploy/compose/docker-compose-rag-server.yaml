@@ -1,3 +1,14 @@
+# ============================================================================
+# CENTRALIZED MODEL CONFIGURATION
+# Change these values to use different models throughout the application
+# ============================================================================
+x-model-config:
+  # Chat/LLM Model Configuration
+  llm-model: &llm-model "nvidia/llama-3.3-nemotron-super-49b-v1"
+  
+  # Embedding Model Configuration
+  embedding-model: &embedding-model "nvidia/llama-3.2-nemoretriever-1b-vlm-embed-v1"
+
 services:
 
   # Main orchestrator server which stiches together all calls to different services to fulfill the user request
@@ -35,14 +46,16 @@ services:
       VECTOR_DB_TOPK: ${VECTOR_DB_TOPK:-100}
 
       ##===LLM Model specific configurations===
-      APP_LLM_MODELNAME: ${APP_LLM_MODELNAME:-"nvidia/llama-3.3-nemotron-super-49b-v1"}
+      # Model name - pulls from centralized config at top of file (can be overridden by env var)
+      APP_LLM_MODELNAME: *llm-model
       # url on which llm model is hosted. If "", Nvidia hosted API is used
-      APP_LLM_SERVERURL: ${APP_LLM_SERVERURL-""}
+      APP_LLM_SERVERURL: ${APP_LLM_SERVERURL:-""}
 
       ##===Embedding Model specific configurations===
+      # Model name - pulls from centralized config at top of file (can be overridden by env var)
+      APP_EMBEDDINGS_MODELNAME: *embedding-model
       # url on which embedding model is hosted. If "", Nvidia hosted API is used
-      APP_EMBEDDINGS_SERVERURL: ${APP_EMBEDDINGS_SERVERURL-""}
-      APP_EMBEDDINGS_MODELNAME: ${APP_EMBEDDINGS_MODELNAME:-nvidia/llama-3.2-nemoretriever-1b-vlm-embed-v1}
+      APP_EMBEDDINGS_SERVERURL: ${APP_EMBEDDINGS_SERVERURL:-""}
 
       NVIDIA_API_KEY: ${NGC_API_KEY:?"NGC_API_KEY is required"}
 
@@ -128,10 +141,10 @@ services:
       context: ../../frontend
       dockerfile: ./Dockerfile
       args:
-        # Model name for LLM
-        NEXT_PUBLIC_MODEL_NAME: ${APP_LLM_MODELNAME:-meta/llama-3.1-8b-instruct}
-        # Model name for embeddings
-        NEXT_PUBLIC_EMBEDDING_MODEL: ${APP_EMBEDDINGS_MODELNAME:-nvidia/nv-embedqa-mistral-7b-v2}
+        # Model name for LLM - pulls from centralized config at top of file
+        NEXT_PUBLIC_MODEL_NAME: *llm-model
+        # Model name for embeddings - pulls from centralized config at top of file
+        NEXT_PUBLIC_EMBEDDING_MODEL: *embedding-model
         # Model name for reranking
         NEXT_PUBLIC_RERANKER_MODEL: ${APP_RANKING_MODELNAME:-nv-rerank-qa-mistral-4b:1}
         # URL for rag server container

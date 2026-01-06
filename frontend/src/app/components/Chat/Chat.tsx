@@ -33,7 +33,6 @@ export default function Chat() {
   const { activePanel, toggleSidebar, setActiveCitations } = useSidebar();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isWizardOpen, setIsWizardOpen] = useState(false);
-  const [expandedConfigId, setExpandedConfigId] = useState<string | null>(null);
   const [isApplyFormOpen, setIsApplyFormOpen] = useState(false);
   const [applyFormConfig, setApplyFormConfig] = useState<any>(null);
   const [showPassthroughError, setShowPassthroughError] = useState(false);
@@ -96,6 +95,8 @@ export default function Chat() {
         const parsed = JSON.parse(lastMessage.content.trim());
         if (parsed.title === "generate_vgpu_config" && parsed.parameters) {
           setLastVGPUConfig(parsed);
+          // Reset chat history for new config
+          setChatPanelHistory([]);
         }
       } catch {
         // Not a JSON config, ignore
@@ -151,9 +152,11 @@ export default function Chat() {
   const renderMessageContent = (content: string, isTyping: boolean, messageId: string) => {
     if (isTyping) {
       return (
-        <div className="flex items-center justify-center space-x-3 py-8">
-          <div className="animate-spin rounded-full h-5 w-5 border-t-2 border-b-2 border-[#76b900]"></div>
-          <span className="text-gray-400">Generating configuration...</span>
+        <div className="flex items-center justify-center h-[calc(100vh-200px)]">
+          <div className="flex items-center space-x-3">
+            <div className="animate-spin rounded-full h-5 w-5 border-t-2 border-b-2 border-[#76b900]"></div>
+            <span className="text-gray-400">Generating configuration...</span>
+          </div>
         </div>
       );
     }
@@ -162,21 +165,20 @@ export default function Chat() {
     if (isVGPUConfig(content)) {
       try {
         const vgpuConfig = JSON.parse(content.trim());
-        const configId = messageId;
-        const isExpanded = expandedConfigId === configId;
         
-        // Return a preview card with inline expandable details AND chat panel
+        // Return a preview card with inline details AND chat panel (always expanded)
         return (
-          <div className="relative w-[80%] mx-auto">
-            <div className="bg-[#252525] border border-[#76b900]/30 rounded-lg p-5 relative">
-              <div className="flex items-center gap-2 mb-4">
+          <div className="w-full flex justify-center">
+            <div className="relative w-[80%]">
+              <div className="bg-[#252525] border border-[#76b900]/30 rounded-lg p-4 relative">
+              <div className="flex items-center gap-2 mb-2">
                 <svg className="w-5 h-5 text-[#76b900]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
                 </svg>
-                <h3 className="text-white font-semibold text-lg">vGPU Configuration Ready</h3>
+                <h3 className="text-white font-semibold text-lg">vGPU Configuration Suggestion</h3>
               </div>
             
-              <p className="text-sm text-gray-300 mb-4">
+              <p className="text-sm text-gray-300 mb-2">
                 {vgpuConfig.description.split(/(Inference|RAG|inference|rag)/gi).map((part: string, i: number) => 
                   /^(Inference|RAG|inference|rag)$/i.test(part) ? (
                     <span key={i} className="font-bold text-[#76b900]">{part}</span>
@@ -198,34 +200,16 @@ export default function Chat() {
                 </div>
               )}
               
-              {/* Configuration Details Toggle Button */}
-              <button
-                onClick={() => {
-                  setExpandedConfigId(isExpanded ? null : configId);
-                  if (!isExpanded) {
-                    // Reset chat history when opening
-                    setChatPanelHistory([]);
-                  }
-                }}
-                className="w-full px-4 py-2.5 bg-neutral-700 hover:bg-neutral-600 text-white rounded-lg font-medium transition-colors flex items-center justify-center gap-2 mb-3"
-              >
-                <svg className={`w-4 h-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
-                {isExpanded ? 'Hide' : 'Show'} Configuration Details
-              </button>
-              
               {/* Inline Configuration Details with Chat Panel */}
-              {isExpanded && (
-                <div className="mb-3 animate-in fade-in duration-200">
-                  <div className="flex items-start h-full bg-[#252525] rounded-lg overflow-hidden">
-                    {/* Configuration Details - 70% */}
-                    <div className="w-[70%] flex flex-col">
+              <div className="mb-2">
+                  <div className="flex flex-col lg:flex-row items-stretch bg-transparent rounded-lg min-w-0 gap-4">
+                    {/* Configuration Details - 70% on large screens, 100% on small - NO scrollbar */}
+                    <div className="w-full lg:w-[70%] flex-shrink min-w-0">
                       <VGPUConfigCard config={vgpuConfig} />
                     </div>
                     
-                    {/* Chat Panel - 30% - Always visible and full height */}
-                    <div className="w-[30%] flex-shrink-0 self-stretch">
+                    {/* Chat Panel - 30% on large screens (right side), 100% on small (below) - Matches left panel height with scroll */}
+                    <div className="w-full lg:w-[30%] flex-shrink-0 min-w-[250px] border border-neutral-700/30 rounded-lg overflow-hidden flex relative">
                       <ChatPanel
                         vgpuConfig={vgpuConfig}
                         onSendMessage={handleChatPanelMessage}
@@ -235,10 +219,12 @@ export default function Chat() {
                     </div>
                   </div>
                 </div>
-              )}
               
-              {/* Action Buttons - Full Width */}
-              <div className="space-y-3">
+              {/* Divider Line */}
+              <div className="w-full h-px bg-neutral-700/50 my-4"></div>
+              
+              {/* Action Buttons - Side by Side */}
+              <div className="flex gap-2">
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -253,12 +239,12 @@ export default function Chat() {
                     setApplyFormConfig(vgpuConfig);
                     setIsApplyFormOpen(true);
                   }}
-                  className="w-full px-4 py-2 bg-[#76b900] hover:bg-[#5a8c00] text-white rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
+                  className="flex-1 px-4 py-2 bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white rounded-lg font-medium transition-all duration-200 flex items-center justify-center gap-2"
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
-                  Verify Configuration
+                  Verify Configuration Locally
                 </button>
                 
                 {/* Size Another Configuration Button */}
@@ -267,16 +253,17 @@ export default function Chat() {
                     e.stopPropagation();
                     setIsWizardOpen(true);
                   }}
-                  className="w-full px-4 py-2 bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white rounded-lg font-medium transition-all duration-200 flex items-center justify-center gap-2"
+                  className="flex-1 px-4 py-2 bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white rounded-lg font-medium transition-all duration-200 flex items-center justify-center gap-2"
                   title="Open Workload Configuration Wizard"
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
                   </svg>
-                  Size another vGPU Configuration
+                  Create Another Sizing Recommendation
                 </button>
               </div>
             </div>
+          </div>
           </div>
         );
       } catch (error) {
@@ -506,42 +493,44 @@ export default function Chat() {
                 <div className="flex items-center justify-center h-full">
                   <button
                     onClick={() => setIsWizardOpen(true)}
-                    className="bg-gradient-to-r from-green-600 to-green-700 text-white px-16 py-8 rounded-xl shadow-2xl hover:from-green-700 hover:to-green-800 transition-all duration-200 hover:scale-[1.05] flex items-center justify-center space-x-4 min-w-[500px]"
+                    className="bg-gradient-to-r from-green-600 to-green-700 text-white px-8 py-5 rounded-lg shadow-lg hover:from-green-700 hover:to-green-800 transition-all duration-200 hover:scale-[1.02] flex items-center justify-center space-x-3"
                     title="Open Workload Configuration Wizard"
                   >
-                    <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
                     </svg>
-                    <span className="text-2xl font-semibold">Create vGPU Sizing Recommendation</span>
+                    <span className="text-lg font-semibold">Create vGPU Sizing Recommendation</span>
                   </button>
                 </div>
               ) : (
-                <div className="space-y-6 w-full flex flex-col items-center">
-                  {messages.map((msg) => (
-                    <div
-                      key={msg.id}
-                      className={`flex w-full ${
-                        msg.role === "user" ? "justify-end" : "justify-start"
-                      }`}
-                    >
+                <div className="min-h-full flex items-center justify-center">
+                  <div className="space-y-4 w-full flex flex-col">
+                    {messages.map((msg) => (
                       <div
-                        className={`w-full ${
-                          msg.role === "user"
-                            ? "text-white"
-                            : "text-white"
+                        key={msg.id}
+                        className={`flex w-full ${
+                          msg.role === "user" ? "justify-end" : "justify-center"
                         }`}
                       >
-                        <div className="text-sm">
-                          {msg.content
-                            ? renderMessageContent(msg.content, false, msg.id)
-                            : msg.role === "assistant" && streamState.isTyping
-                              ? renderMessageContent("", true, msg.id)
-                              : ""}
+                        <div
+                          className={`${msg.role === "user" ? "w-auto max-w-[80%]" : "w-full"} ${
+                            msg.role === "user"
+                              ? "text-white"
+                              : "text-white"
+                          }`}
+                        >
+                          <div className="text-sm">
+                            {msg.content
+                              ? renderMessageContent(msg.content, false, msg.id)
+                              : msg.role === "assistant" && streamState.isTyping
+                                ? renderMessageContent("", true, msg.id)
+                                : ""}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
-                  <div ref={messagesEndRef} />
+                    ))}
+                    <div ref={messagesEndRef} />
+                  </div>
                 </div>
               )}
             </div>
