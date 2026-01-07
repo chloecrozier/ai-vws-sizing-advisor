@@ -60,13 +60,7 @@ export default function ChatPanel({
 
       {/* Chat Messages - Scrollable */}
       <div 
-        className="flex-1 p-3 space-y-3 bg-[#252525] min-h-0"
-        style={{
-          overflowY: 'scroll',
-          scrollbarWidth: 'thin',
-          scrollbarColor: '#76b900 #2a2a2a',
-          WebkitOverflowScrolling: 'touch'
-        }}
+        className="flex-1 p-3 space-y-3 bg-[#252525] min-h-0 overflow-y-auto chat-scrollbar"
       >
         {chatHistory.length === 0 ? (
           <div className="text-center text-gray-500 py-8">

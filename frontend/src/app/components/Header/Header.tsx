@@ -24,8 +24,8 @@ interface HeaderProps {
 
 export default function Header({ onToggleSidebar, activePanel }: HeaderProps) {
   // Pull model names from centralized configuration (via environment variables)
-  const reasoningModel = process.env.NEXT_PUBLIC_MODEL_NAME || "nvidia/llama-3.3-nemotron-super-49b-v1";
-  const embeddingModel = process.env.NEXT_PUBLIC_EMBEDDING_MODEL || "nvidia/llama-3.2-nemoretriever-1b-vlm-embed-v1";
+  const reasoningModel = (process.env.NEXT_PUBLIC_MODEL_NAME || "nvidia/llama-3.3-nemotron-super-49b-v1").replace(/^nvidia\//, '');
+  const embeddingModel = (process.env.NEXT_PUBLIC_EMBEDDING_MODEL || "nvidia/llama-3.2-nemoretriever-1b-vlm-embed-v1").replace(/^nvidia\//, '');
 
   return (
     <div className="flex h-14 items-center justify-between border-b border-neutral-800 bg-black px-4">
@@ -42,10 +42,10 @@ export default function Header({ onToggleSidebar, activePanel }: HeaderProps) {
       <div className="absolute left-1/2 -translate-x-1/2 transform"></div>
       <div className="flex items-center gap-3">
         <span className="rounded-lg border border-neutral-800 bg-neutral-900 px-4 py-1 text-sm text-neutral-100">
-          Reasoning Model: <span className="text-[#76b900]">{reasoningModel}</span>
+          Reasoning: <span className="text-[#76b900]">{reasoningModel}</span>
         </span>
         <span className="rounded-lg border border-neutral-800 bg-neutral-900 px-4 py-1 text-sm text-neutral-100">
-          Embedding Model: <span className="text-[#76b900]">{embeddingModel}</span>
+          Embedding: <span className="text-[#76b900]">{embeddingModel}</span>
         </span>
       </div>
 

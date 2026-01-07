@@ -581,7 +581,7 @@ export default function VGPUConfigCard({ config }: VGPUConfigCardProps) {
             </div>
           )}
 
-          <div className="space-y-6">
+          <div className="space-y-6 overflow-visible">
               {/* VRAM Usage Chart / JSON View */}
               {vramUsage && (
                 <div className="bg-gradient-to-br from-neutral-850/50 to-neutral-900/50 rounded-lg p-4 border border-neutral-700/60 shadow-inner relative">
@@ -600,7 +600,7 @@ export default function VGPUConfigCard({ config }: VGPUConfigCardProps) {
                           <button className="w-5 h-5 rounded-full border border-gray-500 flex items-center justify-center text-[11px] font-semibold text-gray-400 hover:text-gray-300 hover:border-gray-400 transition-colors cursor-help">
                             ?
                           </button>
-                          <div className="absolute right-0 top-8 w-80 p-3 bg-neutral-800 border border-neutral-600 rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-10">
+                          <div className="absolute right-0 top-8 w-80 p-3 bg-neutral-800 border border-neutral-600 rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-[9999]">
                             <p className="text-xs text-gray-300 leading-relaxed">
                               {config.rationale || "This configuration balances performance and resource efficiency for your specific AI workload, ensuring optimal GPU utilization while maintaining cost-effectiveness."}
                             </p>
@@ -721,7 +721,7 @@ export default function VGPUConfigCard({ config }: VGPUConfigCardProps) {
                   {keyParams.length > 0 && (
                     <div className="w-full min-w-0 mt-6">
                       <h4 className="text-white font-medium text-sm mb-3 uppercase tracking-wider">Key Parameters</h4>
-                      <div className="bg-black/20 rounded-lg border border-neutral-700/40 overflow-hidden w-full min-w-0">
+                      <div className="bg-black/20 rounded-lg border border-neutral-700/40 w-full min-w-0">
                         <div className="p-3">
                           <div className="grid gap-2 grid-cols-2">
                             {keyParams.map(([key, value], index) => (
@@ -738,11 +738,11 @@ export default function VGPUConfigCard({ config }: VGPUConfigCardProps) {
                                       {getParameterLabel(key)}
                                     </span>
                                     {parameterDefinitions[key] && (
-                                      <div className="relative group">
+                                      <div className="relative group/tooltip inline-block">
                                         <svg className="w-4 h-4 text-gray-500 hover:text-gray-400 cursor-help" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                                         </svg>
-                                        <div className="absolute left-0 top-6 w-80 p-3 bg-neutral-800 border border-neutral-600 rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50 pointer-events-none">
+                                        <div className="absolute left-1/2 -translate-x-1/2 top-6 w-80 p-3 bg-neutral-800 border border-neutral-600 rounded-lg shadow-2xl opacity-0 invisible group-hover/tooltip:opacity-100 group-hover/tooltip:visible transition-all duration-200 z-[9999] pointer-events-none">
                                           <p className="text-xs text-gray-300 leading-relaxed">
                                             {parameterDefinitions[key]}
                                           </p>

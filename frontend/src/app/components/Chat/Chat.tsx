@@ -202,14 +202,14 @@ export default function Chat() {
               
               {/* Inline Configuration Details with Chat Panel */}
               <div className="mb-2">
-                  <div className="flex flex-col lg:flex-row items-stretch bg-transparent rounded-lg min-w-0 gap-4">
+                  <div className="flex flex-col lg:flex-row items-start bg-transparent rounded-lg min-w-0 gap-4">
                     {/* Configuration Details - 70% on large screens, 100% on small - NO scrollbar */}
-                    <div className="w-full lg:w-[70%] flex-shrink min-w-0">
+                    <div className="w-full lg:w-[70%] flex-shrink min-w-0 overflow-visible">
                       <VGPUConfigCard config={vgpuConfig} />
                     </div>
                     
-                    {/* Chat Panel - 30% on large screens (right side), 100% on small (below) - Matches left panel height with scroll */}
-                    <div className="w-full lg:w-[30%] flex-shrink-0 min-w-[250px] border border-neutral-700/30 rounded-lg overflow-hidden flex relative">
+                    {/* Chat Panel - 30% on large screens (right side), 100% on small (below) - Fixed height with scroll */}
+                    <div className="w-full lg:w-[30%] flex-shrink-0 min-w-[250px] h-[700px] border border-neutral-700/30 rounded-lg overflow-hidden flex">
                       <ChatPanel
                         vgpuConfig={vgpuConfig}
                         onSendMessage={handleChatPanelMessage}

@@ -1249,6 +1249,22 @@ Now provide a complete structured vGPU configuration based on this grounded anal
                             precision = precision or payload.get("Precision", "fp16").lower()
                             workload = payload.get("Workload", "RAG")
                         
+                        # Extract model_tag from model_name
+                        model_tag = None
+                        if model_name:
+                            # Check if model_name is already a HuggingFace model tag (contains "/")
+                            if "/" in model_name:
+                                # Use the full HF model tag directly
+                                model_tag = model_name
+                                logger.info(f"Using HuggingFace model tag directly: {model_tag}")
+                            else:
+                                # Use the dynamic model extractor for simplified names
+                                model_tag = model_extractor.extract(model_name)
+                                # If no match found, use general fallback model
+                                if not model_tag:
+                                    logger.info(f"No exact match for model '{model_name}', using fallback: {GENERAL_FALLBACK_MODEL}")
+                                    model_tag = GENERAL_FALLBACK_MODEL
+                        
                         # Build properly structured parameters with correct field names
                         corrected_params = {
                             "vgpu_profile": params.get("vgpu_profile"),
