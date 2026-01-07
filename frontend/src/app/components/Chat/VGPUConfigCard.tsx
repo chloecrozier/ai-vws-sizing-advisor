@@ -61,6 +61,8 @@ interface VGPUConfig {
 
 interface VGPUConfigCardProps {
   config: VGPUConfig;
+  hideAdvancedDetails?: boolean;
+  showOnlyAdvancedDetails?: boolean;
 }
 
 // Parameter definitions for tooltips - detailed explanations for users
@@ -295,7 +297,7 @@ const getIconType = (key: string): string => {
   }
 };
 
-export default function VGPUConfigCard({ config }: VGPUConfigCardProps) {
+export default function VGPUConfigCard({ config, hideAdvancedDetails = false, showOnlyAdvancedDetails = false }: VGPUConfigCardProps) {
   const [isExpanded, setIsExpanded] = useState(true);
   const [showAdvancedDetails, setShowAdvancedDetails] = useState(false);
   const [showRawJSON, setShowRawJSON] = useState(false);
@@ -542,11 +544,140 @@ export default function VGPUConfigCard({ config }: VGPUConfigCardProps) {
 
   const vramUsage = getVRAMUsageData();
 
+  // If showing only advanced details, render just that section
+  if (showOnlyAdvancedDetails) {
+    return (
+      <div className="w-full min-w-0 overflow-visible">
+        {advancedParams.length > 0 && (
+          <div className="overflow-visible">
+            <button
+              onClick={() => setShowAdvancedDetails(!showAdvancedDetails)}
+              className="flex items-center gap-2 text-gray-400 hover:text-[#76b900]/70 transition-all duration-150 ease-in-out mb-2 group"
+            >
+              <svg className={`w-4 h-4 transform transition-transform duration-150 ease-in-out ${showAdvancedDetails ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+              <span className="text-sm font-medium uppercase tracking-wider">Advanced Details</span>
+            </button>
+            
+            {showAdvancedDetails && (
+              <div className="transition-all duration-150 ease-in-out">
+                <div className="bg-neutral-850/60 rounded-lg p-3 border border-neutral-700/60 w-full min-w-0">
+                  <div className="grid gap-2 grid-cols-3 overflow-visible">
+                    {advancedParams.map(([key, value], index) => (
+                      <div
+                        key={key}
+                        className="group overflow-visible"
+                      >
+                        <div className="flex items-start gap-2 p-2 rounded-lg bg-neutral-800/60 border border-neutral-700/40 hover:border-[#76b900]/30 hover:bg-neutral-800/80 transition-all duration-200">
+                          <div className="mt-0.5">
+                            <ParameterIcon type={getIconType(key)} className="w-4 h-4 text-gray-500" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1.5 mb-1">
+                              <span className="text-xs text-gray-400 font-medium uppercase tracking-wider">
+                                {getParameterLabel(key)}
+                              </span>
+                              {parameterDefinitions[key] && (
+                                <div className="relative group/tooltip inline-block">
+                                  <svg className="w-3 h-3 text-gray-600 hover:text-gray-500 cursor-help" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                  </svg>
+                                  <div className="absolute left-1/2 -translate-x-1/2 top-5 w-80 p-3 bg-neutral-800 border border-neutral-600 rounded-lg shadow-xl opacity-0 invisible group-hover/tooltip:opacity-100 group-hover/tooltip:visible transition-all duration-200 z-[9999] pointer-events-none">
+                                    <p className="text-xs text-gray-300 leading-relaxed">
+                                      {parameterDefinitions[key]}
+                                    </p>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                            <span className="text-sm font-medium text-gray-200 break-words">
+                              {formatParameterValue(key, value)}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                    
+                    {/* Add RAG-specific vector DB details */}
+                    {config.parameters.rag_breakdown?.vector_db_vectors && (
+                      <div className="group overflow-visible">
+                        <div className="flex items-start gap-2 p-2 rounded-lg bg-neutral-800/60 border border-neutral-700/40 hover:border-[#76b900]/30 hover:bg-neutral-800/80 transition-all duration-200">
+                          <div className="mt-0.5">
+                            <ParameterIcon type="database" className="w-4 h-4 text-gray-500" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1.5 mb-1">
+                              <span className="text-xs text-gray-400 font-medium uppercase tracking-wider">
+                                Vector DB Vectors
+                              </span>
+                              {parameterDefinitions['vector_db_vectors'] && (
+                                <div className="relative group/tooltip inline-block">
+                                  <svg className="w-3 h-3 text-gray-600 hover:text-gray-500 cursor-help" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                  </svg>
+                                  <div className="absolute left-1/2 -translate-x-1/2 top-5 w-80 p-3 bg-neutral-800 border border-neutral-600 rounded-lg shadow-xl opacity-0 invisible group-hover/tooltip:opacity-100 group-hover/tooltip:visible transition-all duration-200 z-[9999] pointer-events-none">
+                                    <p className="text-xs text-gray-300 leading-relaxed">
+                                      {parameterDefinitions['vector_db_vectors']}
+                                    </p>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                            <span className="text-sm font-medium text-gray-200 break-words">
+                              {config.parameters.rag_breakdown.vector_db_vectors.toLocaleString()}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    
+                    {config.parameters.rag_breakdown?.vector_db_dimension && (
+                      <div className="group overflow-visible">
+                        <div className="flex items-start gap-2 p-2 rounded-lg bg-neutral-800/60 border border-neutral-700/40 hover:border-[#76b900]/30 hover:bg-neutral-800/80 transition-all duration-200">
+                          <div className="mt-0.5">
+                            <ParameterIcon type="dimension" className="w-4 h-4 text-gray-500" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1.5 mb-1">
+                              <span className="text-xs text-gray-400 font-medium uppercase tracking-wider">
+                                Vector Dimension
+                              </span>
+                              {parameterDefinitions['vector_db_dimension'] && (
+                                <div className="relative group/tooltip inline-block">
+                                  <svg className="w-3 h-3 text-gray-600 hover:text-gray-500 cursor-help" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                  </svg>
+                                  <div className="absolute left-1/2 -translate-x-1/2 top-5 w-80 p-3 bg-neutral-800 border border-neutral-600 rounded-lg shadow-xl opacity-0 invisible group-hover/tooltip:opacity-100 group-hover/tooltip:visible transition-all duration-200 z-[9999] pointer-events-none">
+                                    <p className="text-xs text-gray-300 leading-relaxed">
+                                      {parameterDefinitions['vector_db_dimension']}
+                                    </p>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                            <span className="text-sm font-medium text-gray-200 break-words">
+                              {config.parameters.rag_breakdown.vector_db_dimension}D
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="w-full min-w-0">
       {/* Content */}
       {isExpanded && (
-        <div className="p-4 w-full min-w-0">
+        <div className="pr-4 py-4 w-full min-w-0">
           {/* Host Capabilities Context */}
           {config.host_capabilities && (
             <div className="mb-3 p-3 bg-gray-800/30 border border-gray-700/50 rounded-lg">
@@ -844,7 +975,7 @@ export default function VGPUConfigCard({ config }: VGPUConfigCardProps) {
               )}
 
               {/* Advanced Details - Collapsible */}
-              {advancedParams.length > 0 && (
+              {!hideAdvancedDetails && advancedParams.length > 0 && (
                 <div>
                   <button
                     onClick={() => setShowAdvancedDetails(!showAdvancedDetails)}
@@ -858,7 +989,7 @@ export default function VGPUConfigCard({ config }: VGPUConfigCardProps) {
                   
                   <div className={`transition-all duration-150 ease-in-out ${showAdvancedDetails ? 'opacity-100 max-h-[2000px]' : 'opacity-0 max-h-0 overflow-hidden'}`}>
                     <div className="bg-neutral-850/60 rounded-lg p-3 border border-neutral-700/60 w-full min-w-0">
-                      <div className="grid gap-2 grid-cols-2">
+                      <div className="grid gap-2 grid-cols-3">
                         {advancedParams.map(([key, value], index) => (
                           <div
                             key={key}

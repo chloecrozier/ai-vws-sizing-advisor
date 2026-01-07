@@ -52,7 +52,7 @@ export default function WorkloadConfigWizard({
 }: WorkloadConfigWizardProps) {
   const [config, setConfig] = useState<WorkloadConfig>({
     workloadType: "",
-    specificModel: "",
+    specificModel: "nemotron-30b-fp8",
     modelSize: "",
     batchSize: "",
     promptSize: "1024",
@@ -94,8 +94,14 @@ export default function WorkloadConfigWizard({
               label: model.label,
               modelTag: model.modelTag
             }));
-            setDynamicModels(formattedModels);
-            console.log(`✓ Successfully loaded ${formattedModels.length} models from HuggingFace`);
+            // Always prepend Nemotron as the first/default option
+            const nemotronModel = {
+              value: "nemotron-30b-fp8",
+              label: "NVIDIA Nemotron-3 Nano 30B (FP8)",
+              modelTag: "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-FP8"
+            };
+            setDynamicModels([nemotronModel, ...formattedModels]);
+            console.log(`✓ Successfully loaded ${formattedModels.length + 1} models (including Nemotron)`);
           } else {
             console.warn('No models returned from API');
           }
@@ -155,6 +161,7 @@ export default function WorkloadConfigWizard({
 
   // Fallback hardcoded models in case dynamic fetch fails
   const fallbackModels = [
+    { value: "nemotron-30b-fp8", label: "NVIDIA Nemotron-3 Nano 30B (FP8)", modelTag: "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-FP8" },
     { value: "llama-3-8b", label: "Llama-3-8B", modelTag: "meta-llama/Meta-Llama-3-8B-Instruct" },
     { value: "llama-3-70b", label: "Llama-3-70B", modelTag: "meta-llama/Meta-Llama-3-70B-Instruct" },
     { value: "llama-3.1-8b", label: "Llama-3.1-8B", modelTag: "meta-llama/Llama-3.1-8B-Instruct" },
@@ -548,13 +555,10 @@ export default function WorkloadConfigWizard({
                       className="w-full p-3 rounded-lg bg-neutral-800 border border-neutral-600 text-white mb-4"
                       disabled={isLoadingModels}
                     >
-                      <option value="" disabled>
-                        {isLoadingModels ? "Loading models from HuggingFace..." : "Select a specific model"}
-                      </option>
-                      <option value="unknown">Unknown / Not Sure</option>
                       {specificModels.map((model) => (
                         <option key={model.value} value={model.value}>{model.label}</option>
                       ))}
+                      <option value="unknown">Unknown / Not Sure</option>
                     </select>
                     {!isLoadingModels && dynamicModels.length > 0 && (
                       <p className="text-xs text-green-500 mb-2">✓ {dynamicModels.length} models loaded from HuggingFace</p>

@@ -64,7 +64,16 @@ export default function ChatPanel({
       >
         {chatHistory.length === 0 ? (
           <div className="text-center text-gray-500 py-8">
-            <p className="text-sm text-gray-400">Ask questions about your configuration</p>
+            <p className="text-sm mb-4 text-gray-400">Ask questions about your configuration</p>
+            <div className="text-xs space-y-2">
+              <p className="text-gray-500 font-medium">Examples:</p>
+              <div className="text-left space-y-1.5 text-gray-600 max-w-[200px] mx-auto">
+                <p>• Why this profile?</p>
+                <p>• Can it handle 10 users?</p>
+                <p>• Is there a smaller option?</p>
+                <p>• RAM requirements?</p>
+              </div>
+            </div>
           </div>
         ) : (
           chatHistory.map((msg, idx) => (
