@@ -15,7 +15,32 @@
 
 "use client";
 
-import { useState } from "react";
+import { useState, ReactNode } from "react";
+
+// Tooltip trigger component - displays content in card's bottom banner
+const TooltipTrigger = ({ 
+  content, 
+  children, 
+  onShow, 
+  onHide 
+}: { 
+  content: string; 
+  children: ReactNode; 
+  onShow: (content: string) => void; 
+  onHide: () => void; 
+}) => {
+  return (
+    <div className="relative inline-block group">
+      <div
+        onMouseEnter={() => onShow(content)}
+        onMouseLeave={onHide}
+        className="cursor-help"
+      >
+        {children}
+      </div>
+    </div>
+  );
+};
 
 interface VGPUConfig {
   title: string;
@@ -25,6 +50,7 @@ interface VGPUConfig {
     gpu_model?: string | null;
     vcpu_count?: number | null;
     gpu_memory_size?: number | null;
+    gpu_count?: number | null;
     system_RAM?: number | null;
     concurrent_users?: number | null;
     rag_breakdown?: {
@@ -37,6 +63,9 @@ interface VGPUConfig {
       vector_db_dimension?: number;
       reranker_model?: string;
       reranker_memory?: string;
+      // Token configuration
+      prompt_size?: number;
+      response_size?: number;
     };
     // Legacy fields for backward compatibility (to be removed)
     vGPU_profile?: string | null;
@@ -79,6 +108,7 @@ const parameterDefinitions: { [key: string]: string } = {
   time_to_first_token: "Time from request start until the first output token is generated (TTFT). Critical for streaming responses and perceived responsiveness. Heavily influenced by prompt length.",
   throughput: "Number of tokens the system can generate per second across all concurrent requests. Higher throughput means better overall capacity and efficiency.",
   model_tag: "The specific LLM model identifier (e.g., meta-llama/Llama-3-8b-instruct). Used to determine model size, architecture, and memory requirements.",
+  precision: "Numerical precision for model inference. FP16 (16-bit) offers high accuracy with moderate memory. FP8 (8-bit) reduces memory by ~50% with minimal accuracy loss. FP4 (4-bit) offers maximum memory savings for inference-only workloads.",
   vector_db_vectors: "Total number of document embeddings stored in the vector database. More vectors = larger knowledge base but requires more memory for the vector index.",
   vector_db_dimension: "Dimensionality of each embedding vector (determined by the embedding model). Common dimensions: 384, 768, 1024, 1536. Higher dimensions capture more semantic information but require more memory.",
   // Legacy fields (kept for backward compatibility)
@@ -144,6 +174,19 @@ const ParameterIcon = ({ type, className = "w-4 h-4" }: { type: string; classNam
   }
 };
 
+// Helper to darken a color
+const darkenColor = (color: string, amount: number = 0.4): string => {
+  // Handle hex colors
+  if (color.startsWith('#')) {
+    const hex = color.slice(1);
+    const r = Math.max(0, Math.floor(parseInt(hex.slice(0, 2), 16) * (1 - amount)));
+    const g = Math.max(0, Math.floor(parseInt(hex.slice(2, 4), 16) * (1 - amount)));
+    const b = Math.max(0, Math.floor(parseInt(hex.slice(4, 6), 16) * (1 - amount)));
+    return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+  }
+  return color;
+};
+
 // Circular Progress Chart Component
 const VRAMUsageChart = ({ 
   usedVRAM, 
@@ -156,19 +199,31 @@ const VRAMUsageChart = ({
   numGPUs: number;
   gpuModel?: string;
 }) => {
-  const percentage = Math.min((usedVRAM / totalVRAM) * 100, 100);
+  // Calculate percentages - usable is 95% of total (5% reserved for system overhead)
+  const usableVRAM = totalVRAM * 0.95;
+  const reservedVRAM = totalVRAM * 0.05;
+  const percentage = Math.min((usedVRAM / usableVRAM) * 100, 100);
+  const reservedPercentage = 5; // Fixed 5% reserved for system overhead
+  // Cap the used percentage at 95% so overhead segment is always visible
+  // The dial shows: 0-95% for actual usage, 95-100% for reserved overhead
+  const usedPercentageOfTotal = Math.min((usedVRAM / totalVRAM) * 100, 95);
+  
   const radius = 80;
   const strokeWidth = 12;
   const normalizedRadius = radius - strokeWidth * 2;
   const circumference = normalizedRadius * 2 * Math.PI;
-  const strokeDashoffset = circumference - (percentage / 100) * circumference;
   
-  // Determine fit category and color
-  const getFitCategory = (pct: number): { label: string; color: string; bgColor: string; textColor: string } => {
+  // Calculate stroke offsets - overhead segment starts at 95% position
+  const usedStrokeDashoffset = circumference - (usedPercentageOfTotal / 100) * circumference;
+  const reservedStrokeDashoffset = circumference - (95 / 100) * circumference;
+  
+  // Determine fit category and color based on usable percentage
+  const getFitCategory = (pct: number): { label: string; color: string; darkColor: string; bgColor: string; textColor: string } => {
     if (pct >= 90) {
       return { 
         label: "TIGHT", 
         color: "#ef4444", // red-500
+        darkColor: darkenColor("#ef4444", 0.5), // darker red for overhead
         bgColor: "rgba(239, 68, 68, 0.1)", // red with opacity
         textColor: "#fca5a5" // red-300
       };
@@ -176,6 +231,7 @@ const VRAMUsageChart = ({
       return { 
         label: "MODERATE", 
         color: "#76b900", // NVIDIA green
+        darkColor: darkenColor("#76b900", 0.5), // darker green for overhead
         bgColor: "rgba(118, 185, 0, 0.1)", // green with opacity
         textColor: "#a3e635" // lime-400
       };
@@ -183,6 +239,7 @@ const VRAMUsageChart = ({
       return { 
         label: "COMFORTABLE", 
         color: "#10b981", // emerald-500
+        darkColor: darkenColor("#10b981", 0.5), // darker emerald for overhead
         bgColor: "rgba(16, 185, 129, 0.1)", // emerald with opacity
         textColor: "#6ee7b7" // emerald-300
       };
@@ -217,18 +274,42 @@ const VRAMUsageChart = ({
             cx={radius}
             cy={radius}
           />
-          {/* Progress circle */}
+          {/* Used VRAM circle */}
           <circle
             stroke={fitCategory.color}
             fill="transparent"
             strokeWidth={strokeWidth}
             strokeDasharray={circumference + ' ' + circumference}
-            style={{ strokeDashoffset }}
+            style={{ strokeDashoffset: usedStrokeDashoffset }}
             strokeLinecap="round"
             r={normalizedRadius}
             cx={radius}
             cy={radius}
             className="transition-all duration-700 ease-out filter drop-shadow-lg"
+          />
+          {/* Reserved/Overhead segment (5% - striped pattern to stand out) */}
+          <circle
+            stroke={fitCategory.darkColor}
+            fill="transparent"
+            strokeWidth={strokeWidth}
+            strokeDasharray={`${(reservedPercentage / 100) * circumference} ${circumference}`}
+            style={{ strokeDashoffset: reservedStrokeDashoffset }}
+            r={normalizedRadius}
+            cx={radius}
+            cy={radius}
+            className="opacity-80"
+          />
+          {/* Overhead indicator line (subtle marker at 95% position) */}
+          <circle
+            stroke="#ffffff"
+            fill="transparent"
+            strokeWidth={2}
+            strokeDasharray={`2 ${circumference - 2}`}
+            style={{ strokeDashoffset: circumference - (95 / 100) * circumference }}
+            r={normalizedRadius}
+            cx={radius}
+            cy={radius}
+            className="opacity-30"
           />
         </svg>
         {/* Center text */}
@@ -256,14 +337,14 @@ const VRAMUsageChart = ({
       {/* Usage details */}
       <div className="mt-4 text-center">
         <div className="text-lg font-semibold text-gray-100">
-          {usedVRAM.toFixed(1)} GB
+          {usedVRAM.toFixed(1)} GB <span className="text-gray-500 font-normal">+</span> <span className="text-gray-400 text-sm">{reservedVRAM.toFixed(1)} overhead</span>
         </div>
         <div className="text-sm text-gray-500">
           of {totalVRAM.toFixed(0)} GB VRAM
         </div>
         {numGPUs > 1 && (
           <div className="mt-1 text-xs text-[#76b900] font-medium">
-            ({numGPUs}× {gpuModel || 'GPU'} GPUs with {(totalVRAM / numGPUs).toFixed(0)}GB each)
+            ({numGPUs}× {gpuModel || 'GPU'} with {(totalVRAM / numGPUs).toFixed(0)}GB each)
           </div>
         )}
       </div>
@@ -302,6 +383,8 @@ export default function VGPUConfigCard({ config, hideAdvancedDetails = false, sh
   const [showAdvancedDetails, setShowAdvancedDetails] = useState(false);
   const [showRawJSON, setShowRawJSON] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [keyParamsTooltip, setKeyParamsTooltip] = useState<string | null>(null);
+  const [advancedTooltip, setAdvancedTooltip] = useState<string | null>(null);
 
   // Function to extract GPU memory capacity from vGPU profile
   const getGPUCapacityFromProfile = (profile: string | null | undefined): number | null => {
@@ -426,6 +509,8 @@ export default function VGPUConfigCard({ config, hideAdvancedDetails = false, sh
         return 'Performance Tier';
       case 'concurrent_users':
         return 'Concurrent Users';
+      case 'precision':
+        return 'Precision';
       default:
         return key.replace(/_/g, ' ').replace(/^./, str => str.toUpperCase());
     }
@@ -433,8 +518,8 @@ export default function VGPUConfigCard({ config, hideAdvancedDetails = false, sh
 
   const isRelevantConfig = Object.values(config.parameters).some(value => value !== null && value !== undefined);
 
-  // Fields to exclude from display
-  const excludedFields = ['total_CPU_count', 'total_cpu_count', 'rag_breakdown', 'gpu_count'];
+  // Fields to exclude from display (RAG-specific fields are shown in RAG Components Memory section)
+  const excludedFields = ['total_CPU_count', 'total_cpu_count', 'rag_breakdown', 'gpu_count', 'gpu_model', 'embedding_model', 'vector_db_vectors', 'vector_db_dimension'];
   
   // Separate key and advanced parameters, excluding unwanted fields
   const keyParams = Object.entries(config.parameters).filter(([key]) => 
@@ -513,7 +598,9 @@ export default function VGPUConfigCard({ config, hideAdvancedDetails = false, sh
       
       // For passthrough, use 95% usable capacity (reserve 5% for driver/OS overhead)
       const usablePerGpu = gpuCapacity * 0.95;
-      const numGPUs = Math.ceil(estimatedVRAM / usablePerGpu);
+      // Use gpu_count from backend if available (backend has already calculated this correctly)
+      const backendGpuCount = config.parameters.gpu_count;
+      const numGPUs = backendGpuCount && backendGpuCount >= 1 ? backendGpuCount : Math.ceil(estimatedVRAM / usablePerGpu);
       
       return {
         used: estimatedVRAM,
@@ -528,8 +615,65 @@ export default function VGPUConfigCard({ config, hideAdvancedDetails = false, sh
     const singleGPUCapacity = getGPUCapacityFromProfile(profile);
     if (!singleGPUCapacity) return null;
     
-    // Calculate number of GPUs needed (ceiling)
-    const numGPUs = Math.ceil(estimatedVRAM / singleGPUCapacity);
+    // Use gpu_count from backend if available AND valid
+    // Validate that backend gpu_count provides enough capacity for required VRAM
+    const backendGpuCount = config.parameters.gpu_count;
+    let numGPUs: number;
+    let needsLargerProfile = false;
+    
+    // Small epsilon for floating point comparison (0.1 GB tolerance)
+    const EPSILON = 0.1;
+    
+    if (backendGpuCount && backendGpuCount >= 1) {
+      const backendCapacity = backendGpuCount * singleGPUCapacity;
+      // Check if backend calculation provides enough capacity (with 5% headroom)
+      const usableBackendCapacity = backendCapacity * 0.95;
+      // Use epsilon for floating point comparison (24 * 0.95 = 22.799999... not 22.8)
+      if (usableBackendCapacity + EPSILON >= estimatedVRAM) {
+        numGPUs = backendGpuCount;
+      } else {
+        // Backend config is invalid - recalculate based on usable capacity per GPU
+        const usablePerGpu = singleGPUCapacity * 0.95;
+        numGPUs = Math.ceil(estimatedVRAM / (usablePerGpu + EPSILON));
+        console.warn(`Backend gpu_count (${backendGpuCount}) insufficient for ${estimatedVRAM}GB. Recalculated to ${numGPUs}.`);
+      }
+    } else {
+      // No backend count - calculate ourselves with 5% headroom per GPU
+      const usablePerGpu = singleGPUCapacity * 0.95;
+      numGPUs = Math.ceil(estimatedVRAM / (usablePerGpu + EPSILON));
+    }
+    
+    // Check if there's a larger vGPU profile available that could reduce GPU count
+    // Only show warning if: 1) numGPUs > 1, 2) it's a vGPU profile, AND 3) a larger profile exists
+    if (numGPUs > 1 && profile) {
+      // Get max profile capacity for this GPU family
+      const gpuFamily = profile.split('-')[0];
+      const maxProfiles: { [key: string]: number } = {
+        'BSE': 96,
+        'L40S': 48,
+        'L40': 48,
+        'A40': 48,
+        'L4': 24
+      };
+      const maxProfileCapacity = maxProfiles[gpuFamily] || singleGPUCapacity;
+      
+      // Only flag as needing larger profile if:
+      // 1. Current profile is NOT the largest available for this GPU family, AND
+      // 2. A larger profile would actually reduce the number of GPUs needed
+      if (singleGPUCapacity < maxProfileCapacity) {
+        const usableMaxProfile = maxProfileCapacity * 0.95;
+        const gpusNeededWithMaxProfile = Math.ceil(estimatedVRAM / usableMaxProfile);
+        
+        // Only show warning if upgrading to max profile would reduce GPU count
+        if (gpusNeededWithMaxProfile < numGPUs) {
+          needsLargerProfile = true;
+          console.warn(`Consider ${gpuFamily}-${maxProfileCapacity}Q profile which would only need ${gpusNeededWithMaxProfile} GPU(s) instead of ${numGPUs}.`);
+        }
+      }
+      // Note: If already using largest profile, multi-GPU vGPU is the correct solution
+      // No warning needed - this is expected behavior for large workloads
+    }
+    
     // Calculate total capacity across all GPUs
     const totalCapacity = numGPUs * singleGPUCapacity;
     
@@ -538,7 +682,8 @@ export default function VGPUConfigCard({ config, hideAdvancedDetails = false, sh
       total: totalCapacity,
       numGPUs: numGPUs,
       singleGPUCapacity: singleGPUCapacity,
-      isPassthrough: false
+      isPassthrough: false,
+      needsLargerProfile: needsLargerProfile
     };
   };
 
@@ -598,71 +743,6 @@ export default function VGPUConfigCard({ config, hideAdvancedDetails = false, sh
                         </div>
                       </div>
                     ))}
-                    
-                    {/* Add RAG-specific vector DB details */}
-                    {config.parameters.rag_breakdown?.vector_db_vectors && (
-                      <div className="group overflow-visible">
-                        <div className="flex items-start gap-2 p-2 rounded-lg bg-neutral-800/60 border border-neutral-700/40 hover:border-[#76b900]/30 hover:bg-neutral-800/80 transition-all duration-200">
-                          <div className="mt-0.5">
-                            <ParameterIcon type="database" className="w-4 h-4 text-gray-500" />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-1.5 mb-1">
-                              <span className="text-xs text-gray-400 font-medium uppercase tracking-wider">
-                                Vector DB Vectors
-                              </span>
-                              {parameterDefinitions['vector_db_vectors'] && (
-                                <div className="relative group/tooltip inline-block">
-                                  <svg className="w-3 h-3 text-gray-600 hover:text-gray-500 cursor-help" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                  </svg>
-                                  <div className="absolute left-1/2 -translate-x-1/2 top-5 w-80 p-3 bg-neutral-800 border border-neutral-600 rounded-lg shadow-xl opacity-0 invisible group-hover/tooltip:opacity-100 group-hover/tooltip:visible transition-all duration-200 z-[9999] pointer-events-none">
-                                    <p className="text-xs text-gray-300 leading-relaxed">
-                                      {parameterDefinitions['vector_db_vectors']}
-                                    </p>
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                            <span className="text-sm font-medium text-gray-200 break-words">
-                              {config.parameters.rag_breakdown.vector_db_vectors.toLocaleString()}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                    
-                    {config.parameters.rag_breakdown?.vector_db_dimension && (
-                      <div className="group overflow-visible">
-                        <div className="flex items-start gap-2 p-2 rounded-lg bg-neutral-800/60 border border-neutral-700/40 hover:border-[#76b900]/30 hover:bg-neutral-800/80 transition-all duration-200">
-                          <div className="mt-0.5">
-                            <ParameterIcon type="dimension" className="w-4 h-4 text-gray-500" />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-1.5 mb-1">
-                              <span className="text-xs text-gray-400 font-medium uppercase tracking-wider">
-                                Vector Dimension
-                              </span>
-                              {parameterDefinitions['vector_db_dimension'] && (
-                                <div className="relative group/tooltip inline-block">
-                                  <svg className="w-3 h-3 text-gray-600 hover:text-gray-500 cursor-help" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                  </svg>
-                                  <div className="absolute left-1/2 -translate-x-1/2 top-5 w-80 p-3 bg-neutral-800 border border-neutral-600 rounded-lg shadow-xl opacity-0 invisible group-hover/tooltip:opacity-100 group-hover/tooltip:visible transition-all duration-200 z-[9999] pointer-events-none">
-                                    <p className="text-xs text-gray-300 leading-relaxed">
-                                      {parameterDefinitions['vector_db_dimension']}
-                                    </p>
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                            <span className="text-sm font-medium text-gray-200 break-words">
-                              {config.parameters.rag_breakdown.vector_db_dimension}D
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    )}
                   </div>
                 </div>
               </div>
@@ -807,11 +887,15 @@ export default function VGPUConfigCard({ config, hideAdvancedDetails = false, sh
                         <h5 className="text-sm font-medium text-gray-300 mb-2">Configuration Summary</h5>
                         <div className="space-y-1.5 text-sm">
                           <div className="flex justify-between">
-                            <span className="text-gray-500">Required VRAM:</span>
+                            <span className="text-gray-400">Required VRAM:</span>
                             <span className="text-gray-200 font-medium">{vramUsage.used.toFixed(1)} GB</span>
                           </div>
                           <div className="flex justify-between">
-                            <span className="text-gray-500">GPU Profile:</span>
+                            <span className="text-gray-400">5% Reserved Overhead:</span>
+                            <span className="text-gray-200 font-medium">{(vramUsage.total * 0.05).toFixed(1)} GB</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-gray-400">GPU Profile:</span>
                             <span className="text-gray-200 font-medium">
                               {config.parameters.vgpu_profile || config.parameters.vGPU_profile || 
                                 <span className="text-yellow-500">GPU Passthrough Required</span>
@@ -819,11 +903,16 @@ export default function VGPUConfigCard({ config, hideAdvancedDetails = false, sh
                             </span>
                           </div>
                           <div className="flex justify-between">
-                            <span className="text-gray-500">GPUs Required:</span>
+                            <span className="text-gray-400">GPUs Required:</span>
                             <span className="text-gray-200 font-medium">{vramUsage.numGPUs}</span>
                           </div>
+                          {vramUsage.needsLargerProfile && (
+                            <div className="mt-2 p-2 bg-yellow-900/30 border border-yellow-600/50 rounded text-xs text-yellow-300">
+                              ⚠️ Consider a larger vGPU profile or GPU passthrough. Multi-GPU vGPU profiles typically require separate VMs.
+                            </div>
+                          )}
                           <div className="flex justify-between">
-                            <span className="text-gray-500">Total Capacity:</span>
+                            <span className="text-gray-400">Total Capacity:</span>
                             <span className="text-[#76b900] font-medium">{vramUsage.total.toFixed(0)} GB</span>
                           </div>
                         </div>
@@ -831,16 +920,16 @@ export default function VGPUConfigCard({ config, hideAdvancedDetails = false, sh
                       <div className="text-sm text-gray-400 space-y-2">
                         <p className="text-xs uppercase tracking-wider font-medium text-gray-500 mb-2">Utilization Guidelines</p>
                         <ul className="space-y-1.5 text-xs">
-                          <li className="flex items-start gap-2">
-                            <span className="text-emerald-500 mt-0.5 text-lg">●</span>
+                          <li className="flex items-center gap-2">
+                            <span className="text-emerald-500 text-sm leading-none">●</span>
                             <span><strong className="text-emerald-400">Comfortable (0-60%):</strong> Ideal for production with room for growth</span>
                           </li>
-                          <li className="flex items-start gap-2">
-                            <span className="text-[#76b900] mt-0.5 text-lg">●</span>
+                          <li className="flex items-center gap-2">
+                            <span className="text-[#76b900] text-sm leading-none">●</span>
                             <span><strong className="text-[#a3e635]">Moderate (60-90%):</strong> Efficient utilization with performance buffer</span>
                           </li>
-                          <li className="flex items-start gap-2">
-                            <span className="text-red-500 mt-0.5 text-lg">●</span>
+                          <li className="flex items-center gap-2">
+                            <span className="text-red-500 text-sm leading-none">●</span>
                             <span><strong className="text-red-400">Tight (90-100%):</strong> Consider larger GPU profile or additional units</span>
                           </li>
                         </ul>
@@ -901,71 +990,83 @@ export default function VGPUConfigCard({ config, hideAdvancedDetails = false, sh
               {config.parameters.rag_breakdown && 
                config.parameters.rag_breakdown.workload_type === 'rag' && 
                (config.parameters.rag_breakdown.embedding_model || config.parameters.rag_breakdown.vector_db_memory) && (
-                <div className="mb-3 w-full min-w-0">
-                  <h4 className="text-sm font-semibold text-gray-300 mb-2 uppercase tracking-wider flex items-center gap-2">
+                <div className="mb-6">
+                  <h4 className="text-sm font-semibold text-gray-300 mb-3 uppercase tracking-wider flex items-center gap-2">
                     <svg className="w-4 h-4 text-[#76b900]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
                     </svg>
                     RAG Components Memory
                   </h4>
-                  <div className="bg-neutral-850/60 rounded-lg p-3 border border-neutral-700/60 w-full min-w-0">
-                    <div className="grid grid-cols-2 gap-2">
+                  <div className="bg-neutral-850/60 rounded-lg p-4 border border-neutral-700/60">
+                    <div className="space-y-3">
                       {/* Embedding Model */}
                       {config.parameters.rag_breakdown.embedding_model && (
-                        <div className="flex flex-col p-2 bg-neutral-800/60 rounded-lg border border-neutral-700/40">
-                          <div className="text-xs text-gray-400 mb-1">Embedding Model</div>
-                          <div className="text-sm font-medium text-white break-all mb-2">
-                            {config.parameters.rag_breakdown.embedding_model}
-                          </div>
-                          {config.parameters.rag_breakdown.vector_db_dimension && (
-                            <div className="text-xs text-gray-500 mb-2">
-                              Output: {config.parameters.rag_breakdown.vector_db_dimension}D vectors
+                        <div className="flex items-start justify-between p-3 bg-neutral-800/60 rounded-lg border border-neutral-700/40">
+                          <div className="flex-1">
+                            <div className="text-xs text-gray-400 mb-1">Embedding Model</div>
+                            <div className="text-sm font-medium text-white break-all">
+                              {config.parameters.rag_breakdown.embedding_model}
                             </div>
-                          )}
-                          <div className="text-lg font-semibold text-[#76b900] mt-auto">
-                            {config.parameters.rag_breakdown.embedding_memory}
+                            {config.parameters.rag_breakdown.vector_db_dimension && (
+                              <div className="text-xs text-gray-500 mt-1">
+                                Output: {config.parameters.rag_breakdown.vector_db_dimension}D vectors
+                              </div>
+                            )}
+                          </div>
+                          <div className="ml-4 flex items-center justify-center">
+                            <div className="text-lg font-semibold text-[#76b900]">
+                              {config.parameters.rag_breakdown.embedding_memory}
+                            </div>
                           </div>
                         </div>
                       )}
 
                       {/* Vector Database */}
                       {config.parameters.rag_breakdown.vector_db_memory && (
-                        <div className="flex flex-col p-2 bg-neutral-800/60 rounded-lg border border-neutral-700/40">
-                          <div className="text-xs text-gray-400 mb-1">Vector Database Index</div>
-                          <div className="text-sm text-gray-300 mb-2">
-                            {config.parameters.rag_breakdown.vector_db_vectors && 
-                             config.parameters.rag_breakdown.vector_db_dimension && (
-                              <>
-                                <div className="font-medium">
-                                  {config.parameters.rag_breakdown.vector_db_vectors >= 10000000 ? 'Extra Large' :
-                                   config.parameters.rag_breakdown.vector_db_vectors >= 1000000 ? 'Large' :
-                                   config.parameters.rag_breakdown.vector_db_vectors >= 100000 ? 'Medium' : 'Small'}
-                                </div>
-                                <div className="text-xs text-gray-500 mt-1">
-                                  {config.parameters.rag_breakdown.vector_db_vectors.toLocaleString()} vectors × {config.parameters.rag_breakdown.vector_db_dimension}D
-                                </div>
-                              </>
-                            )}
-                            {(!config.parameters.rag_breakdown.vector_db_vectors || 
-                              !config.parameters.rag_breakdown.vector_db_dimension) && (
-                              <span>Index memory</span>
-                            )}
+                        <div className="flex items-start justify-between p-3 bg-neutral-800/60 rounded-lg border border-neutral-700/40">
+                          <div className="flex-1">
+                            <div className="text-xs text-gray-400 mb-1">Vector Database Index</div>
+                            <div className="text-sm text-gray-300">
+                              {config.parameters.rag_breakdown.vector_db_vectors && 
+                               config.parameters.rag_breakdown.vector_db_dimension && (
+                                <>
+                                  <div className="font-medium">
+                                    {config.parameters.rag_breakdown.vector_db_vectors >= 10000000 ? 'Extra Large' :
+                                     config.parameters.rag_breakdown.vector_db_vectors >= 1000000 ? 'Large' :
+                                     config.parameters.rag_breakdown.vector_db_vectors >= 100000 ? 'Medium' : 'Small'}
+                                  </div>
+                                  <div className="text-xs text-gray-500 mt-1">
+                                    {config.parameters.rag_breakdown.vector_db_vectors.toLocaleString()} vectors × {config.parameters.rag_breakdown.vector_db_dimension}D
+                                  </div>
+                                </>
+                              )}
+                              {(!config.parameters.rag_breakdown.vector_db_vectors || 
+                                !config.parameters.rag_breakdown.vector_db_dimension) && (
+                                <span>Index memory</span>
+                              )}
+                            </div>
                           </div>
-                          <div className="text-lg font-semibold text-[#76b900] mt-auto">
-                            {config.parameters.rag_breakdown.vector_db_memory}
+                          <div className="ml-4 flex items-center justify-center">
+                            <div className="text-lg font-semibold text-[#76b900]">
+                              {config.parameters.rag_breakdown.vector_db_memory}
+                            </div>
                           </div>
                         </div>
                       )}
 
                       {/* Reranker Model */}
                       {config.parameters.rag_breakdown.reranker_model && (
-                        <div className="flex flex-col p-2 bg-neutral-800/60 rounded-lg border border-neutral-700/40">
-                          <div className="text-xs text-gray-400 mb-1">Reranker Model</div>
-                          <div className="text-sm font-medium text-white break-all mb-2">
-                            {config.parameters.rag_breakdown.reranker_model}
+                        <div className="flex items-start justify-between p-3 bg-neutral-800/60 rounded-lg border border-neutral-700/40">
+                          <div className="flex-1">
+                            <div className="text-xs text-gray-400 mb-1">Reranker Model</div>
+                            <div className="text-sm font-medium text-white break-all">
+                              {config.parameters.rag_breakdown.reranker_model}
+                            </div>
                           </div>
-                          <div className="text-lg font-semibold text-[#76b900] mt-auto">
-                            {config.parameters.rag_breakdown.reranker_memory}
+                          <div className="ml-4 flex items-center justify-center">
+                            <div className="text-lg font-semibold text-[#76b900]">
+                              {config.parameters.rag_breakdown.reranker_memory}
+                            </div>
                           </div>
                         </div>
                       )}
@@ -979,7 +1080,7 @@ export default function VGPUConfigCard({ config, hideAdvancedDetails = false, sh
                 <div>
                   <button
                     onClick={() => setShowAdvancedDetails(!showAdvancedDetails)}
-                    className="flex items-center gap-2 text-gray-400 hover:text-[#76b900]/70 transition-all duration-150 ease-in-out mb-2 group"
+                    className="flex items-center gap-2 text-gray-400 hover:text-[#76b900]/70 transition-all duration-150 ease-in-out mb-4 group"
                   >
                     <svg className={`w-4 h-4 transform transition-transform duration-150 ease-in-out ${showAdvancedDetails ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -987,15 +1088,15 @@ export default function VGPUConfigCard({ config, hideAdvancedDetails = false, sh
                     <span className="text-sm font-medium uppercase tracking-wider">Advanced Details</span>
                   </button>
                   
-                  <div className={`transition-all duration-150 ease-in-out ${showAdvancedDetails ? 'opacity-100 max-h-[2000px]' : 'opacity-0 max-h-0 overflow-hidden'}`}>
-                    <div className="bg-neutral-850/60 rounded-lg p-3 border border-neutral-700/60 w-full min-w-0">
-                      <div className="grid gap-2 grid-cols-3">
+                  <div className={`transition-all duration-150 ease-in-out overflow-hidden ${showAdvancedDetails ? 'opacity-100 max-h-[2000px]' : 'opacity-0 max-h-0'}`}>
+                    <div className="bg-neutral-850/60 rounded-lg p-4 border border-neutral-700/60">
+                      <div className="grid gap-4 md:grid-cols-2">
                         {advancedParams.map(([key, value], index) => (
                           <div
                             key={key}
                             className="group"
                           >
-                            <div className="flex items-start gap-2 p-2 rounded-lg bg-neutral-800/60 border border-neutral-700/40 hover:border-[#76b900]/30 hover:bg-neutral-800/80 transition-all duration-200">
+                            <div className="flex items-start gap-3 p-3 rounded-lg bg-neutral-800/60 border border-neutral-700/40 hover:border-[#76b900]/30 hover:bg-neutral-800/80 transition-all duration-200">
                               <div className="mt-0.5">
                                 <ParameterIcon type={getIconType(key)} className="w-4 h-4 text-gray-500" />
                               </div>
@@ -1005,16 +1106,15 @@ export default function VGPUConfigCard({ config, hideAdvancedDetails = false, sh
                                     {getParameterLabel(key)}
                                   </span>
                                   {parameterDefinitions[key] && (
-                                    <div className="relative group">
+                                    <TooltipTrigger 
+                                      content={parameterDefinitions[key]}
+                                      onShow={setAdvancedTooltip}
+                                      onHide={() => setAdvancedTooltip(null)}
+                                    >
                                       <svg className="w-3 h-3 text-gray-600 hover:text-gray-500 cursor-help" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                                       </svg>
-                                      <div className="absolute left-0 top-5 w-80 p-3 bg-neutral-800 border border-neutral-600 rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50 pointer-events-none">
-                                        <p className="text-xs text-gray-300 leading-relaxed">
-                                          {parameterDefinitions[key]}
-                                        </p>
-                                      </div>
-                                    </div>
+                                    </TooltipTrigger>
                                   )}
                                 </div>
                                 <span className="text-sm font-medium text-gray-200 break-words">
@@ -1024,73 +1124,20 @@ export default function VGPUConfigCard({ config, hideAdvancedDetails = false, sh
                             </div>
                           </div>
                         ))}
-                        
-                        {/* Add RAG-specific vector DB details */}
-                        {config.parameters.rag_breakdown?.vector_db_vectors && (
-                          <div className="group">
-                            <div className="flex items-start gap-2 p-2 rounded-lg bg-neutral-800/60 border border-neutral-700/40 hover:border-[#76b900]/30 hover:bg-neutral-800/80 transition-all duration-200">
-                              <div className="mt-0.5">
-                                <ParameterIcon type="database" className="w-4 h-4 text-gray-500" />
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-1.5 mb-1">
-                                  <span className="text-xs text-gray-400 font-medium uppercase tracking-wider">
-                                    Vector DB Vectors
-                                  </span>
-                                  {parameterDefinitions['vector_db_vectors'] && (
-                                    <div className="relative group">
-                                      <svg className="w-3 h-3 text-gray-600 hover:text-gray-500 cursor-help" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                      </svg>
-                                      <div className="absolute left-0 top-5 w-80 p-3 bg-neutral-800 border border-neutral-600 rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50 pointer-events-none">
-                                        <p className="text-xs text-gray-300 leading-relaxed">
-                                          {parameterDefinitions['vector_db_vectors']}
-                                        </p>
-                                      </div>
-                                    </div>
-                                  )}
-                                </div>
-                                <span className="text-sm font-medium text-gray-200 break-words">
-                                  {config.parameters.rag_breakdown.vector_db_vectors.toLocaleString()}
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                        
-                        {config.parameters.rag_breakdown?.vector_db_dimension && (
-                          <div className="group">
-                            <div className="flex items-start gap-2 p-2 rounded-lg bg-neutral-800/60 border border-neutral-700/40 hover:border-[#76b900]/30 hover:bg-neutral-800/80 transition-all duration-200">
-                              <div className="mt-0.5">
-                                <ParameterIcon type="dimension" className="w-4 h-4 text-gray-500" />
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-1.5 mb-1">
-                                  <span className="text-xs text-gray-400 font-medium uppercase tracking-wider">
-                                    Vector Dimension
-                                  </span>
-                                  {parameterDefinitions['vector_db_dimension'] && (
-                                    <div className="relative group">
-                                      <svg className="w-3 h-3 text-gray-600 hover:text-gray-500 cursor-help" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                      </svg>
-                                      <div className="absolute left-0 top-5 w-80 p-3 bg-neutral-800 border border-neutral-600 rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50 pointer-events-none">
-                                        <p className="text-xs text-gray-300 leading-relaxed">
-                                          {parameterDefinitions['vector_db_dimension']}
-                                        </p>
-                                      </div>
-                                    </div>
-                                  )}
-                                </div>
-                                <span className="text-sm font-medium text-gray-200 break-words">
-                                  {config.parameters.rag_breakdown.vector_db_dimension}D
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-                        )}
                       </div>
                     </div>
+                    
+                    {/* Tooltip Banner for Advanced Details */}
+                    {advancedTooltip && (
+                      <div className="border-t-2 border-[#76b900]/60 bg-neutral-800/95 px-4 py-3 backdrop-blur-sm">
+                        <div className="flex items-start gap-3">
+                          <svg className="w-4 h-4 text-[#76b900] mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                          <div className="flex-1 text-xs leading-relaxed text-gray-300">{advancedTooltip}</div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

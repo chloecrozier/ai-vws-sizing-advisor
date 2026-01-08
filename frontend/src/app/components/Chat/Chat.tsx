@@ -38,7 +38,11 @@ export default function Chat() {
   const [showPassthroughError, setShowPassthroughError] = useState(false);
   const [lastVGPUConfig, setLastVGPUConfig] = useState<any>(null); // Track last vGPU config for context
   const [showChatPanel, setShowChatPanel] = useState(false); // Show inline chat panel
-  const [chatPanelHistory, setChatPanelHistory] = useState<Array<{ role: "user" | "assistant"; content: string }>>([]);
+  const [chatPanelHistory, setChatPanelHistory] = useState<Array<{ 
+    role: "user" | "assistant"; 
+    content: string;
+    citations?: Array<{ text: string; source: string; document_type: string }>;
+  }>>([]);
   const [isChatPanelLoading, setIsChatPanelLoading] = useState(false);
   const { streamState, processStream, startStream, resetStream, stopStream } =
     useChatStream();
@@ -88,21 +92,33 @@ export default function Chat() {
         setActiveCitations(lastMessage.citations);
       }
     }
-    
-    // Extract vGPU config from the last message if it exists
+  }, [messages, activePanel, setActiveCitations]);
+
+  // Separate effect to extract vGPU config (only depends on messages, not activePanel)
+  useEffect(() => {
+    const lastMessage = messages[messages.length - 1];
     if (lastMessage && lastMessage.role === "assistant" && lastMessage.content) {
       try {
         const parsed = JSON.parse(lastMessage.content.trim());
         if (parsed.title === "generate_vgpu_config" && parsed.parameters) {
-          setLastVGPUConfig(parsed);
-          // Reset chat history for new config
-          setChatPanelHistory([]);
+          // Only reset chat history if this is a NEW config (different from last one)
+          setLastVGPUConfig((prevConfig: any) => {
+            const prevProfileId = prevConfig?.parameters?.vgpu_profile || prevConfig?.parameters?.vGPU_profile;
+            const newProfileId = parsed.parameters?.vgpu_profile || parsed.parameters?.vGPU_profile;
+            
+            // Only reset chat history if this is actually a new config
+            if (prevProfileId !== newProfileId || !prevConfig) {
+              setChatPanelHistory([]);
+            }
+            
+            return parsed;
+          });
         }
       } catch {
         // Not a JSON config, ignore
       }
     }
-  }, [messages, activePanel, setActiveCitations]);
+  }, [messages]);
 
   const handleSubmit = async (message: string) => {
     if (!message.trim()) return;
@@ -179,11 +195,32 @@ export default function Chat() {
               </div>
             
               <p className="text-sm text-gray-300 mb-2">
-                {vgpuConfig.description.split(/(Inference|RAG|inference|rag)/gi).map((part: string, i: number) => 
-                  /^(Inference|RAG|inference|rag)$/i.test(part) ? (
-                    <span key={i} className="font-bold text-[#76b900]">{part}</span>
-                  ) : part
-                )}
+                {(() => {
+                  // Only highlight the LAST occurrence of (FP8)/(FP16)/(FP4) - the precision indicator
+                  const desc = vgpuConfig.description;
+                  const precisionMatch = desc.match(/^(.*)\((FP[4816]+)\)(\s*)$/i);
+                  if (precisionMatch) {
+                    // Split the non-precision part for Inference/RAG highlighting
+                    const mainPart = precisionMatch[1];
+                    const precision = precisionMatch[2];
+                    return (
+                      <>
+                        {mainPart.split(/(Inference|RAG)/gi).map((part: string, i: number) =>
+                          /^(Inference|RAG)$/i.test(part) ? (
+                            <span key={i} className="font-bold text-[#76b900]">{part}</span>
+                          ) : part
+                        )}
+                        (<span className="font-semibold text-yellow-400">{precision.toUpperCase()}</span>)
+                      </>
+                    );
+                  }
+                  // No precision suffix, just highlight Inference/RAG
+                  return desc.split(/(Inference|RAG)/gi).map((part: string, i: number) =>
+                    /^(Inference|RAG)$/i.test(part) ? (
+                      <span key={i} className="font-bold text-[#76b900]">{part}</span>
+                    ) : part
+                  );
+                })()}
               </p>
               
               {(vgpuConfig.parameters.vgpu_profile || vgpuConfig.parameters.vGPU_profile) && (
@@ -312,16 +349,129 @@ export default function Chat() {
     setChatPanelHistory((prev) => [...prev, { role: "user", content: message }]);
 
     try {
-      const enhancedMessage = `${message}\n\n[Configuration Context: vGPU Profile: ${lastVGPUConfig.parameters?.vgpu_profile || 'N/A'}, GPU Memory: ${lastVGPUConfig.parameters?.gpu_memory_size || 'N/A'}GB]`;
+      // Build context information about the current configuration
+      const profileId = lastVGPUConfig.parameters?.vgpu_profile || lastVGPUConfig.parameters?.vGPU_profile || 'GPU Passthrough';
+      const gpuMemory = lastVGPUConfig.parameters?.gpu_memory_size || 'N/A';
+      const vcpuCount = lastVGPUConfig.parameters?.vcpu_count || 'N/A';
+      const systemRAM = lastVGPUConfig.parameters?.system_RAM || 'N/A';
+      const precision = lastVGPUConfig.parameters?.precision || 'FP8';
+      
+      // RAG-specific fields
+      const embeddingModel = lastVGPUConfig.parameters?.embedding_model || '';
+      const vectorDbVectors = lastVGPUConfig.parameters?.vector_db_vectors || '';
+      const vectorDbDimension = lastVGPUConfig.parameters?.vector_db_dimension || '';
+      const ragBreakdown = lastVGPUConfig.parameters?.rag_breakdown || {};
+      
+      // Determine if this is a RAG workload
+      const isRagWorkload = lastVGPUConfig.description?.toLowerCase().includes('rag') || embeddingModel;
+      
+      // Get model from parameters OR extract from description
+      let modelTag = lastVGPUConfig.parameters?.model_tag || lastVGPUConfig.parameters?.model_name || '';
+      
+      // If model_tag is empty, try to extract from description
+      if (!modelTag && lastVGPUConfig.description) {
+        // Try to find model name patterns in description
+        const descr = lastVGPUConfig.description;
+        // Look for common patterns like "inference of MODEL_NAME" or "for MODEL_NAME"
+        const modelPatterns = [
+          /inference of ([^\s(]+(?:\s+[^\s(]+)?)/i,
+          /for running ([^\s(]+(?:\s+[^\s(]+)?)/i,
+          /for RAG \(([^)]+)\)/i,
+          /model[:\s]+([^\s(]+(?:\s+[^\s(]+)?)/i,
+          /(NVIDIA[^\s]*-[^\s(]+)/i,
+          /(Llama[^\s(]+)/i,
+          /(Nemotron[^\s(]+)/i,
+        ];
+        for (const pattern of modelPatterns) {
+          const match = descr.match(pattern);
+          if (match) {
+            modelTag = match[1].trim();
+            break;
+          }
+        }
+      }
+      
+      modelTag = modelTag || 'N/A';
+      
+      // Determine model parameter count from name
+      const getModelParams = (tag: string): string => {
+        const lowerTag = tag.toLowerCase();
+        if (lowerTag.includes('30b') || lowerTag.includes('nano-30b')) return '30 billion';
+        if (lowerTag.includes('70b')) return '70 billion';
+        if (lowerTag.includes('8b')) return '8 billion';
+        if (lowerTag.includes('7b')) return '7 billion';
+        if (lowerTag.includes('3b')) return '3 billion';
+        if (lowerTag.includes('1b')) return '1 billion';
+        // Check for MoE patterns like "49b" in Nemotron
+        if (lowerTag.includes('49b')) return '49 billion (Mixture of Experts)';
+        return 'unknown';
+      };
+      
+      const modelParams = getModelParams(modelTag);
+      
+      // Build context based on workload type
+      let workloadContext = '';
+      if (isRagWorkload) {
+        workloadContext = `
+This is a RAG (Retrieval-Augmented Generation) workload:
+- LLM Model: ${modelTag} (${modelParams} parameters, ${precision} precision)
+- Embedding Model: ${embeddingModel || 'Not specified'}
+${vectorDbVectors ? `- Vector DB: ${vectorDbVectors} vectors` : ''}
+${vectorDbDimension ? `- Vector Dimension: ${vectorDbDimension}` : ''}`;
+      } else {
+        workloadContext = `
+This is an Inference workload:
+- Model: ${modelTag} (${modelParams} parameters, ${precision} precision)`;
+      }
+      
+      // Create a system message - this is a general-purpose assistant with configuration context
+      const contextMessage = `You are a helpful AI assistant. Answer the user's question directly and conversationally.
+
+Context - The user is asking about this vGPU configuration:
+- Profile: ${profileId} | GPU Memory: ${gpuMemory}GB | vCPUs: ${vcpuCount} | RAM: ${systemRAM}GB
+${workloadContext}
+
+CRITICAL INSTRUCTIONS:
+- Answer in plain text ONLY. NO JSON. NO structured output.
+- Use your general knowledge about LLMs, GPUs, and AI to answer questions
+- If asked "how many parameters": The ${modelTag.includes('Nemotron') ? 'Nemotron-3-Nano-30B has 30 billion parameters (using Mixture of Experts architecture)' : `model has ${modelParams} parameters`}
+- If asked about the profile: Explain vGPU naming (e.g., BSE-24Q = BSE GPU with 24GB VRAM, Q suffix = time-sliced vGPU)
+- For RAG questions: Explain how the embedding model and LLM work together
+- Use retrieved documentation to support your answers when relevant
+- Be concise and helpful`;
+
+      // Use slightly higher temperature for more varied responses in chat
+      const chatTemperature = Math.min(temperature + 0.1, 1.0);
 
       const requestBody: GenerateRequest = {
-        messages: chatPanelHistory.concat([{ role: "user", content: enhancedMessage }]),
+        messages: [
+          { role: "system", content: contextMessage },
+          ...chatPanelHistory.map(msg => ({ role: msg.role, content: msg.content })),
+          { role: "user", content: message }
+        ],
         collection_name: "vgpu_knowledge_base",
-        temperature,
+        temperature: chatTemperature,
         top_p: topP,
+        reranker_top_k: rerankerTopK,
+        vdb_top_k: vdbTopK,
+        confidence_threshold: confidenceScoreThreshold,
         use_knowledge_base: true,
-        enable_citations: false,
+        enable_citations: true,
+        enable_query_rewriting: true, // Enable query rewriting for better RAG retrieval
+        enable_reranker: true, // Enable reranker for better document ranking
+        enable_guardrails: useGuardrails, // Use guardrails setting from context (configurable)
       };
+
+      // Include model parameters if environment variables are set
+      if (process.env.NEXT_PUBLIC_MODEL_NAME) {
+        requestBody.model = process.env.NEXT_PUBLIC_MODEL_NAME;
+      }
+      if (process.env.NEXT_PUBLIC_EMBEDDING_MODEL) {
+        requestBody.embedding_model = process.env.NEXT_PUBLIC_EMBEDDING_MODEL;
+      }
+      if (process.env.NEXT_PUBLIC_RERANKER_MODEL) {
+        requestBody.reranker_model = process.env.NEXT_PUBLIC_RERANKER_MODEL;
+      }
 
       const response = await fetch("/api/generate", {
         method: "POST",
@@ -335,6 +485,7 @@ export default function Chat() {
       if (!reader) throw new Error("No body");
 
       let assistantMsg = "";
+      let citations: Array<{ text: string; source: string; document_type: string }> = [];
       const decoder = new TextDecoder();
 
       while (true) {
@@ -349,14 +500,57 @@ export default function Chat() {
               if (data.choices?.[0]?.delta?.content) {
                 assistantMsg += data.choices[0].delta.content;
               }
+              // Capture citations if available
+              if (data.citations && Array.isArray(data.citations)) {
+                citations = data.citations;
+              }
             } catch (e) {}
           }
         }
       }
 
-      setChatPanelHistory((prev) => [...prev, { role: "assistant", content: assistantMsg || "No response" }]);
+      // Process the response - handle both JSON structured output and plain text
+      let finalMessage = assistantMsg || "No response";
+      try {
+        const trimmed = assistantMsg.trim();
+        // Check if it looks like JSON
+        if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+          const parsed = JSON.parse(trimmed);
+          if (parsed.title && parsed.parameters) {
+            // This is a function call response from the backend - extract useful info
+            // Don't just use description as it might be generic
+            if (parsed.description && !parsed.description.includes('generate_vgpu_config')) {
+              // Clean up the description - remove technical prefixes
+              let desc = parsed.description;
+              // Remove patterns like "BSE with vGPU profile BSE-24Q for inference of MODEL (FP8)"
+              if (/^(BSE|L40S?|A40|L4)\s+with\s+vGPU\s+profile/i.test(desc)) {
+                // This is a generic config description, provide more helpful response
+                const profile = profileId;
+                const model = modelTag;
+                finalMessage = `The ${profile} profile provides ${gpuMemory}GB of GPU memory. This configuration is sized for running ${model}. Is there something specific you'd like to know about this setup?`;
+              } else {
+                finalMessage = desc;
+              }
+            } else {
+              // Provide a helpful fallback
+              finalMessage = `Based on your configuration (${profileId} with ${gpuMemory}GB), I can help answer questions about the profile, model requirements, or performance expectations. What would you like to know?`;
+            }
+          } else if (parsed.description) {
+            finalMessage = parsed.description;
+          }
+        }
+      } catch (e) {
+        // Not JSON, use as is - this is the expected/good case for chat responses
+      }
+
+      setChatPanelHistory((prev) => [...prev, { 
+        role: "assistant", 
+        content: finalMessage,
+        citations: citations.length > 0 ? citations : undefined
+      }]);
     } catch (error) {
-      setChatPanelHistory((prev) => [...prev, { role: "assistant", content: "Error occurred" }]);
+      console.error("Chat panel error:", error);
+      setChatPanelHistory((prev) => [...prev, { role: "assistant", content: "I'm sorry, I encountered an error processing your question. Please try again." }]);
     } finally {
       setIsChatPanelLoading(false);
     }
