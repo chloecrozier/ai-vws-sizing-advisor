@@ -925,9 +925,11 @@ class VGPUCalculator:
         config = request.advanced_config if request.advanced_config else AdvancedCalculatorConfig()
         
         # Find model
+        logging.info(f"Looking up model: '{request.model_name}'")
         model = self._find_model(request.model_name)
         if not model:
             raise ValueError(f"Model '{request.model_name}' not found. Available: {self.get_available_models()}")
+        logging.info(f"Found model: '{model.name}' with {model.params_billion}B params")
         
         # Get GPU family from vgpu_profile
         gpu = self._find_gpu(request.vgpu_profile)

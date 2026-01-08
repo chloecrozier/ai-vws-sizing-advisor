@@ -1001,6 +1001,12 @@ Now provide a complete structured vGPU configuration based on this grounded anal
                                         # No fallback to hardcoded model - use what was provided
                                         logger.warning(f"No match for model '{model_name}', keeping as-is")
                                         model_tag = model_name  # Use the provided name, don't substitute
+                        
+                        # CRITICAL: ALWAYS update model_name with extracted model_tag for VGPURequest
+                        # The model_tag from query/embedded_config is authoritative over params defaults
+                        if model_tag:
+                            model_name = model_tag
+                            logger.info(f"Using model_tag for calculator: {model_name}")
 
                         # Get precision from embedded config (default to fp8 which is the wizard default)
                         precision_from_config = (embedded_config.get('precision', 'fp8') if embedded_config else precision or 'fp8').lower()
@@ -1644,6 +1650,12 @@ Now provide a complete structured vGPU configuration based on this grounded anal
                                         # No fallback to hardcoded model - use what was provided
                                         logger.warning(f"No match for model '{model_name}', keeping as-is")
                                         model_tag = model_name  # Use the provided name, don't substitute
+                        
+                        # CRITICAL: ALWAYS update model_name with extracted model_tag for VGPURequest
+                        # The model_tag from query/embedded_config is authoritative over params defaults
+                        if model_tag:
+                            model_name = model_tag
+                            logger.info(f"Using model_tag for calculator: {model_name}")
                         
                         # Get precision from embedded config (default to fp8 - wizard default)
                         precision_from_config = (embedded_config.get('precision', 'fp8') if embedded_config else precision or 'fp8').lower()
