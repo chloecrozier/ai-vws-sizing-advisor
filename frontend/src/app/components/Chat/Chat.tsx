@@ -351,84 +351,75 @@ export default function Chat() {
     setIsChatPanelLoading(true);
     setChatPanelHistory((prev) => [...prev, { role: "user", content: message }]);
 
-    try {
-      // Build context information about the current configuration
-      const profileId = lastVGPUConfig.parameters?.vgpu_profile || lastVGPUConfig.parameters?.vGPU_profile || 'GPU Passthrough';
-      const gpuMemory = lastVGPUConfig.parameters?.gpu_memory_size || 'N/A';
-      const vcpuCount = lastVGPUConfig.parameters?.vcpu_count || 'N/A';
-      const systemRAM = lastVGPUConfig.parameters?.system_RAM || 'N/A';
-      const precision = lastVGPUConfig.parameters?.precision || 'FP8';
-      
-      // RAG-specific fields
-      const embeddingModel = lastVGPUConfig.parameters?.embedding_model || '';
-      const vectorDbVectors = lastVGPUConfig.parameters?.vector_db_vectors || '';
-      const vectorDbDimension = lastVGPUConfig.parameters?.vector_db_dimension || '';
-      const ragBreakdown = lastVGPUConfig.parameters?.rag_breakdown || {};
-      
-      // Determine if this is a RAG workload
-      const isRagWorkload = lastVGPUConfig.description?.toLowerCase().includes('rag') || embeddingModel;
-      
-      // Get model from parameters OR extract from description
-      let modelTag = lastVGPUConfig.parameters?.model_tag || lastVGPUConfig.parameters?.model_name || '';
-      
-      // If model_tag is empty, try to extract from description
-      if (!modelTag && lastVGPUConfig.description) {
-        // Try to find model name patterns in description
-        const descr = lastVGPUConfig.description;
-        // Look for common patterns like "inference of MODEL_NAME" or "for MODEL_NAME"
-        const modelPatterns = [
-          /inference of ([^\s(]+(?:\s+[^\s(]+)?)/i,
-          /for running ([^\s(]+(?:\s+[^\s(]+)?)/i,
-          /for RAG \(([^)]+)\)/i,
-          /model[:\s]+([^\s(]+(?:\s+[^\s(]+)?)/i,
-          /(NVIDIA[^\s]*-[^\s(]+)/i,
-          /(Llama[^\s(]+)/i,
-          /(Nemotron[^\s(]+)/i,
-        ];
-        for (const pattern of modelPatterns) {
-          const match = descr.match(pattern);
-          if (match) {
-            modelTag = match[1].trim();
-            break;
-          }
-        }
+    // Extract configuration details for context
+    const profileId = lastVGPUConfig.parameters?.vgpu_profile || lastVGPUConfig.parameters?.vGPU_profile || 'GPU Passthrough';
+    const gpuMemory = lastVGPUConfig.parameters?.gpu_memory_size || 'N/A';
+    const vcpuCount = lastVGPUConfig.parameters?.vcpu_count || lastVGPUConfig.parameters?.vCPU_count || 'N/A';
+    const systemRAM = lastVGPUConfig.parameters?.system_RAM || lastVGPUConfig.parameters?.RAM || 'N/A';
+    const precision = lastVGPUConfig.parameters?.precision || 'FP8';
+    
+    // RAG-specific fields
+    const ragBreakdown = lastVGPUConfig.parameters?.rag_breakdown || {};
+    const ragConfig = lastVGPUConfig.parameters?.rag_config || {};
+    const embeddingModel = lastVGPUConfig.parameters?.embedding_model 
+      || ragConfig.embedding_model 
+      || ragBreakdown.embedding_model 
+      || '';
+    const vectorDbVectors = lastVGPUConfig.parameters?.vector_db_vectors 
+      || ragConfig.total_vectors 
+      || ragBreakdown.vector_db_vectors 
+      || '';
+    const vectorDbDimension = lastVGPUConfig.parameters?.vector_db_dimension 
+      || ragConfig.vector_dimension 
+      || ragBreakdown.vector_db_dimension 
+      || '';
+    const embeddingMemory = ragBreakdown.embedding_memory || '';
+    const vectorDbMemory = ragBreakdown.vector_db_memory || '';
+    const isRagWorkload = lastVGPUConfig.description?.toLowerCase().includes('rag') || !!embeddingModel;
+    
+    // Get model tag
+    let modelTag = lastVGPUConfig.parameters?.model_tag || lastVGPUConfig.parameters?.model_name || '';
+    if (!modelTag && lastVGPUConfig.description) {
+      const patterns = [/inference of ([^\s(]+)/i, /for RAG \(([^)]+)\)/i, /(Nemotron[^\s(]+)/i, /(Llama[^\s(]+)/i];
+      for (const p of patterns) {
+        const m = lastVGPUConfig.description.match(p);
+        if (m) { modelTag = m[1].trim(); break; }
       }
-      
-      modelTag = modelTag || 'N/A';
-      
-      // Determine model parameter count from name
-      const getModelParams = (tag: string): string => {
-        const lowerTag = tag.toLowerCase();
-        if (lowerTag.includes('30b') || lowerTag.includes('nano-30b')) return '30 billion';
-        if (lowerTag.includes('70b')) return '70 billion';
-        if (lowerTag.includes('8b')) return '8 billion';
-        if (lowerTag.includes('7b')) return '7 billion';
-        if (lowerTag.includes('3b')) return '3 billion';
-        if (lowerTag.includes('1b')) return '1 billion';
-        // Check for MoE patterns like "49b" in Nemotron
-        if (lowerTag.includes('49b')) return '49 billion (Mixture of Experts)';
-        return 'unknown';
-      };
-      
-      const modelParams = getModelParams(modelTag);
-      
-      // Build context based on workload type
-      let workloadContext = '';
-      if (isRagWorkload) {
-        workloadContext = `
+    }
+    modelTag = modelTag || 'N/A';
+    
+    // Get model parameter count
+    const getModelParams = (tag: string): string => {
+      const t = tag.toLowerCase();
+      if (t.includes('30b')) return '30 billion';
+      if (t.includes('70b')) return '70 billion';
+      if (t.includes('8b')) return '8 billion';
+      if (t.includes('7b')) return '7 billion';
+      if (t.includes('3b')) return '3 billion';
+      if (t.includes('1b')) return '1 billion';
+      if (t.includes('49b')) return '49 billion (Mixture of Experts)';
+      return 'unknown';
+    };
+    const modelParams = getModelParams(modelTag);
+
+    // Build workload context
+    let workloadContext = '';
+    if (isRagWorkload) {
+      workloadContext = `
 This is a RAG (Retrieval-Augmented Generation) workload:
 - LLM Model: ${modelTag} (${modelParams} parameters, ${precision} precision)
-- Embedding Model: ${embeddingModel || 'Not specified'}
-${vectorDbVectors ? `- Vector DB: ${vectorDbVectors} vectors` : ''}
-${vectorDbDimension ? `- Vector Dimension: ${vectorDbDimension}` : ''}`;
-      } else {
-        workloadContext = `
+- Embedding Model: ${embeddingModel}${embeddingMemory ? ` (requires ${embeddingMemory})` : ''}
+${vectorDbVectors ? `- Vector Database: ${vectorDbVectors} vectors` : ''}
+${vectorDbDimension ? `- Vector Dimension: ${vectorDbDimension}D` : ''}
+${vectorDbMemory ? `- Vector DB Memory: ${vectorDbMemory}` : ''}`;
+    } else {
+      workloadContext = `
 This is an Inference workload:
 - Model: ${modelTag} (${modelParams} parameters, ${precision} precision)`;
-      }
-      
-      // Create a system message - this is a general-purpose assistant with configuration context
-      const contextMessage = `You are a helpful AI assistant. Answer the user's question directly and conversationally.
+    }
+
+    // Create context message for RAG server
+    const contextMessage = `You are a helpful AI assistant. Answer the user's question directly and conversationally.
 
 Context - The user is asking about this vGPU configuration:
 - Profile: ${profileId} | GPU Memory: ${gpuMemory}GB | vCPUs: ${vcpuCount} | RAM: ${systemRAM}GB
@@ -437,13 +428,12 @@ ${workloadContext}
 CRITICAL INSTRUCTIONS:
 - Answer in plain text ONLY. NO JSON. NO structured output.
 - Use your general knowledge about LLMs, GPUs, and AI to answer questions
-- If asked "how many parameters": The ${modelTag.includes('Nemotron') ? 'Nemotron-3-Nano-30B has 30 billion parameters (using Mixture of Experts architecture)' : `model has ${modelParams} parameters`}
 - If asked about the profile: Explain vGPU naming (e.g., BSE-24Q = BSE GPU with 24GB VRAM, Q suffix = time-sliced vGPU)
 - For RAG questions: Explain how the embedding model and LLM work together
 - Use retrieved documentation to support your answers when relevant
 - Be concise and helpful`;
 
-      // Use slightly higher temperature for more varied responses in chat
+    try {
       const chatTemperature = Math.min(temperature + 0.1, 1.0);
 
       const requestBody: GenerateRequest = {
@@ -460,12 +450,12 @@ CRITICAL INSTRUCTIONS:
         confidence_threshold: confidenceScoreThreshold,
         use_knowledge_base: true,
         enable_citations: true,
-        enable_query_rewriting: true, // Enable query rewriting for better RAG retrieval
-        enable_reranker: true, // Enable reranker for better document ranking
-        enable_guardrails: useGuardrails, // Use guardrails setting from context (configurable)
+        enable_query_rewriting: true,
+        enable_reranker: true,
+        enable_guardrails: useGuardrails,
+        conversational_mode: true,
       };
 
-      // Include model parameters if environment variables are set
       if (process.env.NEXT_PUBLIC_MODEL_NAME) {
         requestBody.model = process.env.NEXT_PUBLIC_MODEL_NAME;
       }
@@ -482,10 +472,10 @@ CRITICAL INSTRUCTIONS:
         body: JSON.stringify(requestBody),
       });
 
-      if (!response.ok) throw new Error("Failed");
+      if (!response.ok) throw new Error("RAG server error");
 
       const reader = response.body?.getReader();
-      if (!reader) throw new Error("No body");
+      if (!reader) throw new Error("No response body");
 
       let assistantMsg = "";
       let citations: Array<{ text: string; source: string; document_type: string }> = [];
@@ -503,7 +493,6 @@ CRITICAL INSTRUCTIONS:
               if (data.choices?.[0]?.delta?.content) {
                 assistantMsg += data.choices[0].delta.content;
               }
-              // Capture citations if available
               if (data.citations && Array.isArray(data.citations)) {
                 citations = data.citations;
               }
@@ -512,30 +501,21 @@ CRITICAL INSTRUCTIONS:
         }
       }
 
-      // Process the response - handle both JSON structured output and plain text
+      // Process response - handle JSON structured output and plain text
       let finalMessage = assistantMsg || "No response";
       try {
         const trimmed = assistantMsg.trim();
-        // Check if it looks like JSON
         if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
           const parsed = JSON.parse(trimmed);
           if (parsed.title && parsed.parameters) {
-            // This is a function call response from the backend - extract useful info
-            // Don't just use description as it might be generic
             if (parsed.description && !parsed.description.includes('generate_vgpu_config')) {
-              // Clean up the description - remove technical prefixes
               let desc = parsed.description;
-              // Remove patterns like "BSE with vGPU profile BSE-24Q for inference of MODEL (FP8)"
               if (/^(BSE|L40S?|A40|L4)\s+with\s+vGPU\s+profile/i.test(desc)) {
-                // This is a generic config description, provide more helpful response
-                const profile = profileId;
-                const model = modelTag;
-                finalMessage = `The ${profile} profile provides ${gpuMemory}GB of GPU memory. This configuration is sized for running ${model}. Is there something specific you'd like to know about this setup?`;
+                finalMessage = `The ${profileId} profile provides ${gpuMemory}GB of GPU memory. This configuration is sized for running ${modelTag}. Is there something specific you'd like to know about this setup?`;
               } else {
                 finalMessage = desc;
               }
             } else {
-              // Provide a helpful fallback
               finalMessage = `Based on your configuration (${profileId} with ${gpuMemory}GB), I can help answer questions about the profile, model requirements, or performance expectations. What would you like to know?`;
             }
           } else if (parsed.description) {
@@ -543,7 +523,7 @@ CRITICAL INSTRUCTIONS:
           }
         }
       } catch (e) {
-        // Not JSON, use as is - this is the expected/good case for chat responses
+        // Not JSON - use as is (this is the expected case for chat responses)
       }
 
       setChatPanelHistory((prev) => [...prev, { 
@@ -553,7 +533,10 @@ CRITICAL INSTRUCTIONS:
       }]);
     } catch (error) {
       console.error("Chat panel error:", error);
-      setChatPanelHistory((prev) => [...prev, { role: "assistant", content: "I'm sorry, I encountered an error processing your question. Please try again." }]);
+      setChatPanelHistory((prev) => [...prev, { 
+        role: "assistant", 
+        content: "Error from rag-server. Please check rag-server logs for more details."
+      }]);
     } finally {
       setIsChatPanelLoading(false);
     }

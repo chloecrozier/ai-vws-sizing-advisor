@@ -244,6 +244,10 @@ class Prompt(BaseModel):
         description="Enable or disable citations as part of response.",
         default=os.getenv("ENABLE_CITATIONS", "True").lower() in ["true", "True"],
     )
+    conversational_mode: bool = Field(
+        description="Enable conversational mode for plain text responses instead of structured JSON output.",
+        default=False,
+    )
     model: str = Field(
         description="Name of NIM LLM model to be used for inference.",
         default=os.getenv("APP_LLM_MODELNAME", "").strip('"'),
@@ -987,6 +991,11 @@ async def generate_answer(request: Request, prompt: Prompt) -> StreamingResponse
                         # Try to parse chunk as JSON (structured output)
                         try:
                             structured_data = json.loads(chunk)
+                            
+                            # Only process as structured JSON if it's a dict with expected keys
+                            if not isinstance(structured_data, dict) or not structured_data.get("title"):
+                                # Not a structured vGPU config response - treat as plain text
+                                raise json.JSONDecodeError("Not a structured JSON object", chunk, 0)
                             
                             # Log vGPU configuration metadata for debugging/monitoring
                             if structured_data.get("title"):

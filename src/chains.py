@@ -1388,6 +1388,12 @@ Now provide a complete structured vGPU configuration based on this grounded anal
                                  **kwargs) -> Generator[str, None, None]:
         """Execute a Retrieval Augmented Generation chain using the components defined above."""
 
+        # Check for conversational mode - return plain text instead of structured JSON
+        conversational_mode = kwargs.get("conversational_mode", False)
+        if conversational_mode:
+            logger.info("Using CONVERSATIONAL mode for chat query: %s", query[:100])
+            return self._conversational_chain(query, chat_history, reranker_top_k, vdb_top_k, collection_name, **kwargs)
+
         # Determine if enhanced mode should be used
         use_enhanced = self._should_use_enhanced_mode(query)
         logger.info("Using %s multiturn RAG mode for query: %s", "enhanced" if use_enhanced else "standard", query)
@@ -1845,6 +1851,137 @@ Now provide a complete structured vGPU configuration based on this grounded anal
                     description=f"Failed to generate RAG chain with multi-turn response. {str(e)}"
                 )
                 return iter([json.dumps(error_response.model_dump(), ensure_ascii=False, indent=2)]), []
+
+
+    def _conversational_chain(self,
+                              query: str,
+                              chat_history: List[Dict[str, Any]],
+                              reranker_top_k: int,
+                              vdb_top_k: int,
+                              collection_name: str,
+                              **kwargs) -> tuple:
+        """
+        Execute a conversational RAG chain that returns plain text responses.
+        Used for the chat panel where users ask follow-up questions about their config.
+        """
+        try:
+            document_embedder = get_embedding_model(model=kwargs.get("embedding_model"), url=kwargs.get("embedding_endpoint"))
+            vs = get_vectorstore(document_embedder, collection_name, kwargs.get("vdb_endpoint"))
+            if vs is None:
+                raise APIError("Vector store not initialized properly.", 500)
+
+            llm = get_llm(**kwargs)
+            ranker = get_ranking_model(model=kwargs.get("reranker_model"), url=kwargs.get("reranker_endpoint"), top_n=reranker_top_k)
+            top_k = vdb_top_k if ranker and kwargs.get("enable_reranker") else reranker_top_k
+            retriever = vs.as_retriever(search_kwargs={"k": top_k})
+
+            # Build conversation history for the prompt
+            conversation_history = []
+            user_provided_context = ""
+            history_count = int(os.environ.get("CONVERSATION_HISTORY", 15)) * 2 * -1
+            chat_history = chat_history[history_count:]
+            
+            for message in chat_history:
+                if message.role == "system":
+                    # Capture the system message context from frontend (contains vGPU config details)
+                    user_provided_context = message.content
+                    logger.info(f"[CONVERSATIONAL] Found system context: {user_provided_context[:200]}...")
+                else:
+                    conversation_history.append((message.role, message.content))
+
+            # Build system prompt - include user's configuration context if provided
+            base_prompt = """You are a helpful AI assistant with expertise in NVIDIA GPUs, vGPU technology, LLMs, and AI infrastructure.
+
+Answer the user's question directly and conversationally. Use the retrieved documents AND the configuration context to support your answers.
+
+Guidelines:
+- Be concise but thorough
+- Use plain text only, no JSON or structured output
+- If asked about model parameters, GPU profiles, or vGPU configurations, explain clearly
+- For technical questions, provide specific details when available
+- Reference the user's specific configuration when answering
+- If you don't know something, say so honestly"""
+
+            # Add user's configuration context if provided
+            if user_provided_context:
+                system_prompt = f"""{base_prompt}
+
+=== USER'S CURRENT VGPU CONFIGURATION ===
+{user_provided_context}
+
+=== ADDITIONAL CONTEXT FROM KNOWLEDGE BASE ===
+{{context}}"""
+            else:
+                system_prompt = f"""{base_prompt}
+
+Context from knowledge base:
+{{context}}"""
+            
+            logger.info(f"[CONVERSATIONAL] System prompt length: {len(system_prompt)}")
+
+            # Retrieve relevant documents
+            retriever_query = query
+            if kwargs.get("enable_query_rewriting") and conversation_history:
+                contextualize_q_system_prompt = (
+                    "Given a chat history and the latest user question "
+                    "which might reference context in the chat history, "
+                    "formulate a standalone question which can be understood "
+                    "without the chat history. Do NOT answer the question, "
+                    "just reformulate it if needed and otherwise return it as is."
+                )
+                q_prompt = ChatPromptTemplate.from_messages([
+                    ("system", contextualize_q_system_prompt),
+                    MessagesPlaceholder("chat_history"),
+                    ("human", "{input}"),
+                ])
+                query_rewriter_llm = get_llm(
+                    model=settings.query_rewriter.model_name,
+                    llm_endpoint=settings.query_rewriter.server_url,
+                    **query_rewriter_llm_config
+                )
+                # Create chain: prompt -> LLM -> string output
+                query_rewriter_chain = q_prompt | query_rewriter_llm | StrOutputParser()
+                retriever_query = query_rewriter_chain.invoke(
+                    {"input": query, "chat_history": conversation_history},
+                    config={'run_name': 'query-rewriter'}
+                )
+                logger.info(f"Conversational query rewritten to: {retriever_query}")
+
+            # Get documents
+            docs_raw = retriever.invoke(retriever_query)
+            if ranker and kwargs.get("enable_reranker"):
+                docs_raw = ranker.invoke({"query": retriever_query, "documents": docs_raw})
+            
+            docs = [format_document_with_source(d) for d in docs_raw[:reranker_top_k]]
+            context_str = "\n\n".join(docs) if docs else "No relevant documents found."
+
+            # Build the prompt
+            messages = [("system", system_prompt)]
+            messages.extend(conversation_history)
+            messages.append(("user", query))
+            
+            prompt = ChatPromptTemplate.from_messages(messages)
+            chain = prompt | llm | StrOutputParser()
+
+            def stream_conversational_response():
+                """Yield plain text chunks - server.py handles SSE formatting."""
+                try:
+                    for chunk in chain.stream({"context": context_str}):
+                        # Just yield the raw text - server.py will format as SSE
+                        yield chunk
+                except Exception as e:
+                    logger.error(f"Error in conversational stream: {e}")
+                    yield f"I apologize, but I encountered an error: {str(e)}"
+
+            # Return generator and context for citations
+            context_to_show = docs_raw[:reranker_top_k] if docs_raw else []
+            return stream_conversational_response(), context_to_show
+
+        except Exception as e:
+            logger.error(f"Error in conversational chain: {e}")
+            def error_stream():
+                yield "I'm sorry, I encountered an error processing your question. Please try again."
+            return error_stream(), []
 
 
     def document_search(self, content: str, messages: List, reranker_top_k: int, vdb_top_k: int, collection_name: str = "", **kwargs) -> List[Dict[str, Any]]:
