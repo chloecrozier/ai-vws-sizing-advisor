@@ -449,6 +449,8 @@ class UnstructuredRAG(BaseExample):
                     try:
                         # Extract embedded config if present (from WorkloadConfigWizard)
                         embedded_config = extract_embedded_config(query)
+                        logger.info(f"[LLM_CHAIN DEBUG] Extracted embedded_config: {embedded_config}")
+                        logger.info(f"[LLM_CHAIN DEBUG] modelTag from config: {embedded_config.get('modelTag') if embedded_config else 'NO CONFIG'}")
                         
                         # PRIORITY: Get model from embedded_config FIRST (wizard selection)
                         # This ensures we use Nemotron when user selects it, not the LLM's guess
@@ -625,7 +627,14 @@ class UnstructuredRAG(BaseExample):
                         final_model_tag = embedded_config.get('modelTag')
                         logger.info(f"Using modelTag from embedded config for llm_chain final: {final_model_tag}")
                     if not final_model_tag:
-                        final_model_tag = corrected_params.get("model_tag") or "Unknown"
+                        # FALLBACK: Extract model from query text (e.g. "running nvidia/model-name")
+                        import re
+                        query_model_match = re.search(r'running\s+([\w\-/\.]+/[\w\-\.]+)', query, re.IGNORECASE)
+                        if query_model_match:
+                            final_model_tag = query_model_match.group(1)
+                            logger.info(f"Extracted model from query text for llm_chain: {final_model_tag}")
+                        else:
+                            final_model_tag = corrected_params.get("model_tag") or "Unknown"
                     
                     # Update corrected_params to ensure JSON has the correct model_tag
                     corrected_params["model_tag"] = final_model_tag
@@ -907,6 +916,8 @@ Now provide a complete structured vGPU configuration based on this grounded anal
                         
                         # Extract embedded config to get the actual GPU model and LLM model selected by user
                         embedded_config = extract_embedded_config(query)
+                        logger.info(f"[RAG DEBUG] Extracted embedded_config: {embedded_config}")
+                        logger.info(f"[RAG DEBUG] modelTag from config: {embedded_config.get('modelTag') if embedded_config else 'NO CONFIG'}")
                         
                         # PRIORITY: Get model from embedded config (wizard selection) FIRST
                         # This ensures we use Nemotron when user selects it, not fallback to LLM's guess
@@ -971,17 +982,25 @@ Now provide a complete structured vGPU configuration based on this grounded anal
                             # Embedded config has the full HuggingFace model tag from wizard - USE THIS
                             model_tag = embedded_config.get('modelTag')
                             logger.info(f"Using modelTag from embedded config (authoritative): {model_tag}")
-                        elif model_name:
-                            # Fallback to model_name extraction only if no embedded config
-                            if "/" in model_name:
-                                model_tag = model_name
-                                logger.info(f"Using HuggingFace model tag directly: {model_tag}")
-                            else:
-                                model_tag = model_extractor.extract(model_name)
-                                if not model_tag:
-                                    # No fallback to hardcoded model - use what was provided
-                                    logger.warning(f"No match for model '{model_name}', keeping as-is")
-                                    model_tag = model_name  # Use the provided name, don't substitute
+                        else:
+                            # FALLBACK: Extract model from query text (e.g. "running nvidia/model-name")
+                            # This handles cases where embedded config isn't sent
+                            import re
+                            query_model_match = re.search(r'running\s+([\w\-/\.]+/[\w\-\.]+)', query, re.IGNORECASE)
+                            if query_model_match:
+                                model_tag = query_model_match.group(1)
+                                logger.info(f"Extracted model from query text: {model_tag}")
+                            elif model_name:
+                                # Fallback to model_name extraction only if no embedded config
+                                if "/" in model_name:
+                                    model_tag = model_name
+                                    logger.info(f"Using HuggingFace model tag directly: {model_tag}")
+                                else:
+                                    model_tag = model_extractor.extract(model_name)
+                                    if not model_tag:
+                                        # No fallback to hardcoded model - use what was provided
+                                        logger.warning(f"No match for model '{model_name}', keeping as-is")
+                                        model_tag = model_name  # Use the provided name, don't substitute
 
                         # Get precision from embedded config (default to fp8 which is the wizard default)
                         precision_from_config = (embedded_config.get('precision', 'fp8') if embedded_config else precision or 'fp8').lower()
@@ -1039,10 +1058,17 @@ Now provide a complete structured vGPU configuration based on this grounded anal
                                 logger.info(f"Using batch size (concurrent requests): {batch_size}")
                                 
                                 # Extract RAG-specific parameters if workload type is RAG
-                                # First try embedded config, then fall back to extracted workload from LLM response
+                                # First try embedded config, then detect from query text, then fall back to LLM response
                                 workload_type = embedded_config.get('workloadType', 'inference') if embedded_config else 'inference'
+                                
+                                # ROBUST RAG DETECTION: Check query text directly for RAG indicators
+                                is_rag_query = ('RAG' in query or 'Retrieval-Augmented' in query or 
+                                               'embedding model' in query.lower() or 'vector' in query.lower())
+                                if is_rag_query:
+                                    workload_type = 'rag'
+                                    logger.info(f"Workload type set to 'rag' based on query text analysis")
                                 # If embedded config says inference but LLM extracted "RAG", use that instead
-                                if workload_type.lower() == 'inference' and workload and 'rag' in workload.lower():
+                                elif workload_type.lower() == 'inference' and workload and 'rag' in workload.lower():
                                     workload_type = 'rag'
                                     logger.info(f"Workload type set to 'rag' based on LLM extraction: {workload}")
                                 else:
@@ -1280,6 +1306,19 @@ Now provide a complete structured vGPU configuration based on this grounded anal
                             emb_model_name = embedding_model.split('/')[-1] if embedding_model else "embedding"
                             final_model_name = final_model_tag.split('/')[-1] if '/' in final_model_tag else final_model_tag
                             corrected_description = f"{gpu_model} with vGPU profile {final_profile} for RAG ({final_model_name}) with {emb_model_name} ({final_precision})"
+                            
+                            # Add rag_config sub-object with RAG-specific configuration
+                            rag_config = {
+                                "workload_type": "rag",
+                                "embedding_model": embedding_model,
+                                "vector_dimension": vector_db_dimension,
+                                "total_vectors": vector_db_vectors,
+                            }
+                            # Remove None values
+                            rag_config = {k: v for k, v in rag_config.items() if v is not None}
+                            if rag_config:
+                                corrected_params["rag_config"] = rag_config
+                                logger.info(f"Added rag_config to response: {rag_config}")
                         else:
                             # Format: "L40S with vGPU profile L40S-48Q for inference of model-name (FP8)"
                             final_model_name = final_model_tag.split('/')[-1] if '/' in final_model_tag else final_model_tag
@@ -1534,6 +1573,8 @@ Now provide a complete structured vGPU configuration based on this grounded anal
                         
                         # Extract embedded config to get the actual GPU model selected by user
                         embedded_config = extract_embedded_config(query)
+                        logger.info(f"[MULTITURN DEBUG] Extracted embedded_config: {embedded_config}")
+                        logger.info(f"[MULTITURN DEBUG] modelTag from config: {embedded_config.get('modelTag') if embedded_config else 'NO CONFIG'}")
                         
                         # Extract GPU model from embedded config first (most reliable)
                         gpu_model = None
@@ -1578,17 +1619,25 @@ Now provide a complete structured vGPU configuration based on this grounded anal
                         if embedded_config and embedded_config.get('modelTag'):
                             model_tag = embedded_config.get('modelTag')
                             logger.info(f"Using modelTag from embedded config for multiturn (authoritative): {model_tag}")
-                        elif model_name:
-                            # Fallback to model_name extraction only if no embedded config
-                            if "/" in model_name:
-                                model_tag = model_name
-                                logger.info(f"Using HuggingFace model tag directly: {model_tag}")
-                            else:
-                                model_tag = model_extractor.extract(model_name)
-                                if not model_tag:
-                                    # No fallback to hardcoded model - use what was provided
-                                    logger.warning(f"No match for model '{model_name}', keeping as-is")
-                                    model_tag = model_name  # Use the provided name, don't substitute
+                        else:
+                            # FALLBACK: Extract model from query text (e.g. "running nvidia/model-name")
+                            # This handles cases where embedded config isn't sent
+                            import re
+                            query_model_match = re.search(r'running\s+([\w\-/\.]+/[\w\-\.]+)', query, re.IGNORECASE)
+                            if query_model_match:
+                                model_tag = query_model_match.group(1)
+                                logger.info(f"Extracted model from query text: {model_tag}")
+                            elif model_name:
+                                # Fallback to model_name extraction only if no embedded config
+                                if "/" in model_name:
+                                    model_tag = model_name
+                                    logger.info(f"Using HuggingFace model tag directly: {model_tag}")
+                                else:
+                                    model_tag = model_extractor.extract(model_name)
+                                    if not model_tag:
+                                        # No fallback to hardcoded model - use what was provided
+                                        logger.warning(f"No match for model '{model_name}', keeping as-is")
+                                        model_tag = model_name  # Use the provided name, don't substitute
                         
                         # Get precision from embedded config (default to fp8 - wizard default)
                         precision_from_config = (embedded_config.get('precision', 'fp8') if embedded_config else precision or 'fp8').lower()
@@ -1672,11 +1721,74 @@ Now provide a complete structured vGPU configuration based on this grounded anal
                                     corrected_params["gpu_model"] = f"{gpu_model} (passthrough)"
                                 logger.info(f"Fallback profile: {corrected_params['vgpu_profile']} x{corrected_params.get('gpu_count', 1)}")
                         
+                        # ========== Extract RAG Configuration from Query ==========
+                        # Detect if this is a RAG workload from query text
+                        is_rag_workload = 'RAG' in query or 'Retrieval-Augmented' in query or 'embedding model' in query.lower()
+                        
+                        if is_rag_workload:
+                            import re
+                            rag_config = {}
+                            rag_breakdown = {"workload_type": "rag"}
+                            
+                            # Extract embedding model (e.g., "using embedding model nvidia/nvolveqa-embed-large-1B")
+                            embedding_match = re.search(r'embedding model\s+([\w\-/\.]+)', query, re.IGNORECASE)
+                            if embedding_match:
+                                embedding_model = embedding_match.group(1)
+                                rag_config["embedding_model"] = embedding_model
+                                rag_breakdown["embedding_model"] = embedding_model
+                                # Estimate embedding memory based on model name
+                                embedding_model_lower = embedding_model.lower()
+                                if 'large' in embedding_model_lower or '1b' in embedding_model_lower:
+                                    embedding_mem = 2.0
+                                elif 'base' in embedding_model_lower or '400m' in embedding_model_lower:
+                                    embedding_mem = 0.8
+                                elif 'small' in embedding_model_lower or '200m' in embedding_model_lower:
+                                    embedding_mem = 0.4
+                                else:
+                                    embedding_mem = 1.0
+                                rag_breakdown["embedding_memory"] = f"{embedding_mem:.2f} GB"
+                            
+                            # Extract vector dimension (e.g., "1024d vectors")
+                            dimension_match = re.search(r'(\d+)d\s*vectors', query, re.IGNORECASE)
+                            if dimension_match:
+                                vector_dimension = int(dimension_match.group(1))
+                                rag_config["vector_dimension"] = vector_dimension
+                                rag_breakdown["vector_db_dimension"] = vector_dimension
+                            
+                            # Extract total vectors (e.g., "10000 total vectors")
+                            vectors_match = re.search(r'(\d+)\s*total\s*vectors', query, re.IGNORECASE)
+                            if vectors_match:
+                                total_vectors = int(vectors_match.group(1))
+                                rag_config["total_vectors"] = total_vectors
+                                rag_breakdown["vector_db_vectors"] = total_vectors
+                            
+                            # Calculate vector DB memory if we have both dimension and count
+                            if rag_breakdown.get("vector_db_vectors") and rag_breakdown.get("vector_db_dimension"):
+                                vector_mem_bytes = rag_breakdown["vector_db_vectors"] * rag_breakdown["vector_db_dimension"] * 4 * 1.5
+                                vector_mem_gb = vector_mem_bytes / (1024**3)
+                                if vector_mem_gb < 0.1:
+                                    rag_breakdown["vector_db_memory"] = f"{vector_mem_gb * 1024:.1f} MB"
+                                else:
+                                    rag_breakdown["vector_db_memory"] = f"{vector_mem_gb:.2f} GB"
+                            
+                            # Add RAG config and breakdown to params
+                            if rag_config:
+                                corrected_params["rag_config"] = rag_config
+                            if any(k != "workload_type" for k in rag_breakdown.keys()):
+                                corrected_params["rag_breakdown"] = rag_breakdown
+                                logger.info(f"Added RAG breakdown to multiturn response: {rag_breakdown}")
+                        
                         # Reconstruct description with correct model name and precision
                         final_profile = corrected_params.get("vgpu_profile", "Unknown")
                         final_precision = corrected_params.get("precision", "FP8")
                         final_model_name = model_tag.split('/')[-1] if model_tag and '/' in model_tag else (model_tag or "Unknown")
-                        corrected_description = f"{gpu_model} with vGPU profile {final_profile} for inference of {final_model_name} ({final_precision})"
+                        
+                        # Use different description format for RAG vs Inference
+                        if is_rag_workload and corrected_params.get("rag_config", {}).get("embedding_model"):
+                            embedding_short = corrected_params["rag_config"]["embedding_model"].split('/')[-1]
+                            corrected_description = f"{gpu_model} with vGPU profile {final_profile} for RAG (Retrieval-Augmented Generation) with {final_model_name} and {embedding_short}"
+                        else:
+                            corrected_description = f"{gpu_model} with vGPU profile {final_profile} for inference of {final_model_name} ({final_precision})"
                         
                         # Build the final response with corrected field names
                         final_response = {
