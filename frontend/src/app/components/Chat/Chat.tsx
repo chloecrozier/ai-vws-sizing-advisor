@@ -245,8 +245,11 @@ export default function Chat() {
                       <VGPUConfigCard config={vgpuConfig} hideAdvancedDetails={true} />
                     </div>
                     
-                    {/* Chat Panel - 30% on large screens (right side), 100% on small (below) - Fixed height with scroll */}
-                    <div className="w-full lg:w-[30%] flex-shrink-0 min-w-[250px] h-[600px] border border-neutral-700/30 rounded-lg overflow-hidden flex">
+                    {/* Chat Panel - 30% on large screens (right side), 100% on small (below) 
+                        Height adjusts based on workload type: RAG configs need more space */}
+                    <div className={`w-full lg:w-[30%] flex-shrink-0 min-w-[250px] border border-neutral-700/30 rounded-lg overflow-hidden flex ${
+                      vgpuConfig.parameters?.rag_breakdown?.workload_type === 'rag' ? 'h-[680px]' : 'h-[580px]'
+                    }`}>
                       <ChatPanel
                         vgpuConfig={vgpuConfig}
                         onSendMessage={handleChatPanelMessage}
